@@ -1,22 +1,10 @@
-// lib/extractors/providers/cinesrc_extractor.dart
-//
-// Extractor de CineSRC.
-// Devuelve 3 servidores por petición:
-//   1) CineSRC directo (embed.st)
-//   2) VideoApp  (vía Modlyo)
-//   3) VidSrc    (vía Modlyo)
-//
-// MainFuentes se encarga de deduplicar, verificar (HLS) y enriquecer.
-// El idioma por defecto es latino (es_MX) para que no sea descartado
-// por "unServidorPorIdioma" antes de tiempo.
-
 import 'dart:async';
 
 class CineSrcServer {
-  final String lang;       // "latino", "castellano", "subtitulado", etc.
-  final String name;       // "CineSRC", "VideoApp", "VidSrc"
-  final String url;        // URL del embed
-  final String idiomaCode; // es_MX / es_ES / en_US ...
+  final String lang;
+  final String name;
+  final String url;
+  final String idiomaCode;
 
   const CineSrcServer({
     required this.lang,
@@ -40,11 +28,6 @@ class CineSrcServer {
 }
 
 class CineSrcService {
-  // ─────────────────────────────────────────────────────────
-  // Constructores de URL
-  // ─────────────────────────────────────────────────────────
-
-  /// CineSRC directo (embed oficial).
   static String buildEmbedUrl({
     required int tmdbId,
     required bool isMovie,
@@ -58,7 +41,6 @@ class CineSrcService {
     return '$base?color=%2300ff66&autoplay=true&autonext=true&back=close&prioritize=true';
   }
 
-  /// VideoApp vía Modlyo.
   static String buildVideoAppUrl({
     required int tmdbId,
     required bool isMovie,
@@ -72,7 +54,6 @@ class CineSrcService {
     return 'https://modlyo.com/embed.php?url=$target';
   }
 
-  /// VidSrc vía Modlyo.
   static String buildVidSrcUrl({
     required int tmdbId,
     required bool isMovie,
@@ -86,16 +67,43 @@ class CineSrcService {
     return 'https://modlyo.com/embed.php?url=$target';
   }
 
-  // ─────────────────────────────────────────────────────────
-  // Scrape principal: emite LOS TRES servidores
-  // ─────────────────────────────────────────────────────────
+  static String buildVsEmbedUrl({
+    required int tmdbId,
+    required bool isMovie,
+    int season = 1,
+    int episode = 1,
+  }) {
+    if (isMovie) {
+      return 'https://vsembed.ru/embed/movie?tmdb=$tmdbId&ds_lang=es?auto=1';
+    }
+    return 'https://vsembed.ru/embed/tv?tmdb=$tmdbId&season=$season&episode=$episode&color=e600e6&ds_lang=es?auto=1';
+  }
 
-  /// Emite 3 servidores por petición:
-  ///   - CineSRC  (embed.st)
-  ///   - VideoApp (Modlyo)
-  ///   - VidSrc   (Modlyo)
-  ///
-  /// MainFuentes se encarga del resto (dedup, verificación HLS, etc.).
+  static String buildZxcPrimeUrl({
+    required int tmdbId,
+    required bool isMovie,
+    int season = 1,
+    int episode = 1,
+  }) {
+    if (isMovie) {
+      return 'https://player.zxcprime.xyz/player/movie/$tmdbId?autoplay=true&server=0&back=false&dubLang=esla';
+    }
+    return 'https://player.zxcprime.xyz/player/tv/$tmdbId/$season/$episode?autoplay=true&server=0&back=false&dubLang=esla';
+  }
+
+  static String buildVimeusUrl({
+    required int tmdbId,
+    required bool isMovie,
+    int season = 1,
+    int episode = 1,
+  }) {
+    const viewKey = 'KUDU-EYQ76rbZwNu7hun16C4HX0K6qy77hZw4CaveiI';
+    if (isMovie) {
+      return 'https://vimeus.com/e/movie?tmdb=$tmdbId&view_key=$viewKey&title=+&theme=minimal';
+    }
+    return 'https://vimeus.com/e/serie?tmdb=$tmdbId&se=$season&ep=$episode&view_key=$viewKey&title=+&theme=minimal';
+  }
+
   static Stream<CineSrcServer> scrape({
     required int tmdbId,
     required bool isMovie,
@@ -104,7 +112,6 @@ class CineSrcService {
   }) async* {
     if (tmdbId <= 0) return;
 
-    // 1) CineSRC directo
     yield CineSrcServer(
       lang: 'latino',
       name: 'CineSRC',
@@ -117,7 +124,6 @@ class CineSrcService {
       idiomaCode: 'es_MX',
     );
 
-    // 2) VideoApp vía Modlyo
     yield CineSrcServer(
       lang: 'latino',
       name: 'VideoApp',
@@ -130,7 +136,6 @@ class CineSrcService {
       idiomaCode: 'es_MX',
     );
 
-    // 3) VidSrc vía Modlyo
     yield CineSrcServer(
       lang: 'latino',
       name: 'VidSrc',
@@ -142,13 +147,44 @@ class CineSrcService {
       ),
       idiomaCode: 'es_MX',
     );
+
+    yield CineSrcServer(
+      lang: 'ingles',
+      name: 'VsEmbed',
+      url: buildVsEmbedUrl(
+        tmdbId: tmdbId,
+        isMovie: isMovie,
+        season: season,
+        episode: episode,
+      ),
+      idiomaCode: 'en_US',
+    );
+
+    yield CineSrcServer(
+      lang: 'ingles',
+      name: 'ZxcPrime',
+      url: buildZxcPrimeUrl(
+        tmdbId: tmdbId,
+        isMovie: isMovie,
+        season: season,
+        episode: episode,
+      ),
+      idiomaCode: 'en_US',
+    );
+
+    yield CineSrcServer(
+      lang: 'latino',
+      name: 'Vimeus',
+      url: buildVimeusUrl(
+        tmdbId: tmdbId,
+        isMovie: isMovie,
+        season: season,
+        episode: episode,
+      ),
+      idiomaCode: 'es_MX',
+    );
   }
 
-  // ─────────────────────────────────────────────────────────
-  // Scrapes individuales (por si los quieres usar sueltos)
-  // ─────────────────────────────────────────────────────────
-
-  /// Solo CineSRC directo.
   static Stream<CineSrcServer> scrapeCineSrc({
     required int tmdbId,
     required bool isMovie,
@@ -168,7 +204,6 @@ class CineSrcService {
     );
   }
 
-  /// Solo VideoApp vía Modlyo.
   static Stream<CineSrcServer> scrapeVideoApp({
     required int tmdbId,
     required bool isMovie,
@@ -188,7 +223,6 @@ class CineSrcService {
     );
   }
 
-  /// Solo VidSrc vía Modlyo.
   static Stream<CineSrcServer> scrapeVidSrc({
     required int tmdbId,
     required bool isMovie,
@@ -199,6 +233,63 @@ class CineSrcService {
       lang: 'latino',
       name: 'VidSrc',
       url: buildVidSrcUrl(
+        tmdbId: tmdbId,
+        isMovie: isMovie,
+        season: season,
+        episode: episode,
+      ),
+      idiomaCode: 'es_MX',
+    );
+  }
+
+  static Stream<CineSrcServer> scrapeVsEmbed({
+    required int tmdbId,
+    required bool isMovie,
+    int season = 1,
+    int episode = 1,
+  }) async* {
+    yield CineSrcServer(
+      lang: 'ingles',
+      name: 'VsEmbed',
+      url: buildVsEmbedUrl(
+        tmdbId: tmdbId,
+        isMovie: isMovie,
+        season: season,
+        episode: episode,
+      ),
+      idiomaCode: 'en_US',
+    );
+  }
+
+  static Stream<CineSrcServer> scrapeZxcPrime({
+    required int tmdbId,
+    required bool isMovie,
+    int season = 1,
+    int episode = 1,
+  }) async* {
+    yield CineSrcServer(
+      lang: 'ingles',
+      name: 'ZxcPrime',
+      url: buildZxcPrimeUrl(
+        tmdbId: tmdbId,
+        isMovie: isMovie,
+        season: season,
+        episode: episode,
+      ),
+      idiomaCode: 'en_US',
+    );
+  }
+
+  static Stream<CineSrcServer> scrapeVimeus({
+    required int tmdbId,
+    required bool isMovie,
+    int season = 1,
+    int episode = 1,
+  }) async* {
+    yield CineSrcServer(
+      lang: 'latino',
+      name: 'Vimeus',
+      url: buildVimeusUrl(
         tmdbId: tmdbId,
         isMovie: isMovie,
         season: season,

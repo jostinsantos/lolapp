@@ -13,8 +13,10 @@ import '../../player/presentation/tv/tv_player_controller.dart';
 import '../../player/presentation/tv/tv_player_page.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_content.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_recommendations_api.dart';
+
 const kAccentColor = Color(0xFFE50914);
-const double _kEpisodeItemExtent = 214.0; // ancho tarjeta + margen (slider horizontal)
+const double _kEpisodeItemExtent =
+    214.0; // ancho tarjeta + margen (slider horizontal)
 const double _kRecoItemExtent = 148.0; // ancho poster reco + margen
 
 class GuardadosBus {
@@ -466,7 +468,8 @@ class _PageContenidoState extends State<PageContenido>
       final mr = _mostRecentEpisode;
       // Si había un episodio reciente, lo reabrimos desde 0; si no, el primero de la temporada actual.
       final temp = mr?.season ?? _currentSeasonNumber;
-      final cap = mr?.episode ??
+      final cap =
+          mr?.episode ??
           (_currentEpisodes.isNotEmpty
               ? (_currentEpisodes.first['episode_number'] as num?)?.toInt() ?? 1
               : 1);
@@ -512,7 +515,9 @@ class _PageContenidoState extends State<PageContenido>
       builder: (ctx) {
         return Dialog(
           backgroundColor: const Color(0xFF141414),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(28, 24, 28, 20),
             child: Column(
@@ -697,7 +702,10 @@ class _PageContenidoState extends State<PageContenido>
     for (final n in _recoFocusNodes) {
       n.dispose();
     }
-    _recoFocusNodes = List.generate(_recommendations.length, (_) => FocusNode());
+    _recoFocusNodes = List.generate(
+      _recommendations.length,
+      (_) => FocusNode(),
+    );
   }
 
   void _selectSeason(int index, {bool focusPreferredEpisode = false}) {
@@ -710,8 +718,10 @@ class _PageContenidoState extends State<PageContenido>
       if (episodes.isEmpty) return;
 
       final targetIdx = focusPreferredEpisode
-          ? _preferredEpisodeIndexFor(_currentSeasonNumber, episodes)
-              .clamp(0, episodes.length - 1)
+          ? _preferredEpisodeIndexFor(
+              _currentSeasonNumber,
+              episodes,
+            ).clamp(0, episodes.length - 1)
           : 0;
 
       _episodeBgNotifier.value = _episodeBackdropUrl(episodes[targetIdx]);
@@ -733,7 +743,9 @@ class _PageContenidoState extends State<PageContenido>
   String _episodeBackdropUrl(Map ep) {
     final raw = ep['still_path']?.toString() ?? '';
     if (raw.isEmpty) return '';
-    return raw.startsWith('http') ? raw : 'https://image.tmdb.org/t/p/w1280$raw';
+    return raw.startsWith('http')
+        ? raw
+        : 'https://image.tmdb.org/t/p/w1280$raw';
   }
 
   String _recoBackdropUrl(Map item) {
@@ -745,7 +757,9 @@ class _PageContenidoState extends State<PageContenido>
           ? poster
           : 'https://image.tmdb.org/t/p/w1280$poster';
     }
-    return raw.startsWith('http') ? raw : 'https://image.tmdb.org/t/p/w1280$raw';
+    return raw.startsWith('http')
+        ? raw
+        : 'https://image.tmdb.org/t/p/w1280$raw';
   }
 
   String _recoPosterUrl(Map item) {
@@ -774,7 +788,9 @@ class _PageContenidoState extends State<PageContenido>
     final id = (item['id'] as num?)?.toInt();
     if (id == null) return;
     final mt = (item['media_type']?.toString() ?? 'movie').toLowerCase();
-    final mediaType = (mt == 'tv' || mt == 'serie' || mt == 'series') ? 'tv' : 'movie';
+    final mediaType = (mt == 'tv' || mt == 'serie' || mt == 'series')
+        ? 'tv'
+        : 'movie';
     final requestId = DateTime.now().microsecondsSinceEpoch;
     _recoDetailsRequestId = requestId;
     try {
@@ -849,8 +865,10 @@ class _PageContenidoState extends State<PageContenido>
     final episodes = _currentEpisodes;
     final preferredIdx = episodes.isEmpty
         ? 0
-        : _preferredEpisodeIndexFor(_currentSeasonNumber, episodes)
-            .clamp(0, episodes.length - 1);
+        : _preferredEpisodeIndexFor(
+            _currentSeasonNumber,
+            episodes,
+          ).clamp(0, episodes.length - 1);
 
     if (episodes.isNotEmpty) {
       _episodeBgNotifier.value = _episodeBackdropUrl(episodes[preferredIdx]);
@@ -861,7 +879,10 @@ class _PageContenidoState extends State<PageContenido>
 
       // Foco inicial: temporada del progreso + capítulo más reciente.
       if (_seasonFocusNodes.isNotEmpty) {
-        final sIdx = _selectedSeasonIndex.clamp(0, _seasonFocusNodes.length - 1);
+        final sIdx = _selectedSeasonIndex.clamp(
+          0,
+          _seasonFocusNodes.length - 1,
+        );
         _seasonFocusNodes[sIdx].requestFocus();
       }
 
@@ -964,8 +985,10 @@ class _PageContenidoState extends State<PageContenido>
             _episodeScrollController.jumpTo(0);
           }
         } else if (_seasonFocusNodes.isNotEmpty) {
-          final sIdx =
-              _selectedSeasonIndex.clamp(0, _seasonFocusNodes.length - 1);
+          final sIdx = _selectedSeasonIndex.clamp(
+            0,
+            _seasonFocusNodes.length - 1,
+          );
           _seasonFocusNodes[sIdx].requestFocus();
         } else {
           _playFocusNode.requestFocus();
@@ -990,11 +1013,8 @@ class _PageContenidoState extends State<PageContenido>
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => PageContenido(
-          idcontenido: id,
-          tmdbId: id,
-          mediaType: mediaType,
-        ),
+        builder: (_) =>
+            PageContenido(idcontenido: id, tmdbId: id, mediaType: mediaType),
       ),
     );
   }
@@ -1098,7 +1118,8 @@ class _PageContenidoState extends State<PageContenido>
       return;
     }
 
-    // AUTO: ServerLoader (first-win) → player con m3u8 o vacío.
+    // AUTO: ServerLoader (first-win) → player solo si hay fuente;
+    // si no encuentra servidor óptimo → modal de servidores.
     bool dialogShown = false;
     if (mounted) {
       dialogShown = true;
@@ -1134,6 +1155,31 @@ class _PageContenidoState extends State<PageContenido>
     }
 
     if (!mounted) return;
+
+    // Sin fuente óptima → abrir modal de servidores (no player vacío).
+    if (videoUrl.isEmpty) {
+      showDialog(
+        context: context,
+        barrierDismissible: true,
+        builder: (_) => ServidoresModalTv(
+          idcontenido: widget.idcontenido,
+          tmdbId: _resolvedTmdbId,
+          temporada: temporada,
+          capitulo: capitulo,
+          titulo: titulo,
+          tipo: tipo,
+          backdropUrl: _firstUrl(data?['backdrop_path']),
+          posterUrl: _firstUrl(data?['poster_path']),
+          logoUrl: _firstUrl(data?['logo_path']),
+        ),
+      ).then((_) {
+        _loadFullProgress();
+        HistorialBus.bump();
+      });
+      return;
+    }
+
+    // Sí hay fuente → abrir player.
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
@@ -1297,9 +1343,7 @@ class _PageContenidoState extends State<PageContenido>
                                     sigmaY: 26,
                                   ),
                                   child: Container(
-                                    color: Colors.black.withValues(
-                                      alpha: 0.32,
-                                    ),
+                                    color: Colors.black.withValues(alpha: 0.32),
                                   ),
                                 ),
                               ],
@@ -1373,179 +1417,181 @@ class _PageContenidoState extends State<PageContenido>
                     ),
                   )
                 : episodesViewActive
-                    ? Padding(
-                        padding: const EdgeInsets.fromLTRB(44, 28, 44, 30),
-                        child: ValueListenableBuilder<Map<String, dynamic>?>(
-                          valueListenable: _progressNotifier,
-                          builder: (context, progress, _) {
-                            final progTemp = progress?['temporada'] as int?;
-                            final progCap = progress?['capitulo'] as int?;
-                            final progSec = progress?['segundo'] as int?;
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(44, 28, 44, 30),
+                    child: ValueListenableBuilder<Map<String, dynamic>?>(
+                      valueListenable: _progressNotifier,
+                      builder: (context, progress, _) {
+                        final progTemp = progress?['temporada'] as int?;
+                        final progCap = progress?['capitulo'] as int?;
+                        final progSec = progress?['segundo'] as int?;
 
-                            return _EpisodesBottomPanel(
-                              seasons: seasons,
-                              selectedSeasonIndex: _selectedSeasonIndex,
-                              episodes: currentEpisodes,
-                              seasonFocusNodes: _seasonFocusNodes,
-                              episodeFocusNodes: _episodeFocusNodes,
-                              episodeScrollController: _episodeScrollController,
-                              onSeasonSelected: (i) =>
-                                  _selectSeason(i, focusPreferredEpisode: false),
-                              onEpisodeTap: (epNumber) => _openServidores(
-                                temporada: currentSeasonNumber,
-                                capitulo: epNumber,
-                              ),
-                              onExitEpisodesView: _exitEpisodesView,
-                              onEpisodeFocusChanged: _handleEpisodeFocusChanged,
-                              onRequestRecommendations: _enterRecommendationsView,
-                              currentSeasonNumber: currentSeasonNumber,
-                              progressSeasonNumber: progTemp,
-                              progressEpisodeNumber: progCap,
-                              progressSeconds: (progSec != null && progSec > 5)
-                                  ? progSec
-                                  : null,
-                              allEpisodeProgress: _allEpisodeProgress,
-                              preferredEpisodeIndex: _preferredEpisodeIndexFor(
-                                currentSeasonNumber,
-                                currentEpisodes,
-                              ),
-                              seriesCast: List<Map<String, dynamic>>.from(
-                                (data['cast'] is List)
-                                    ? data['cast'] as List
-                                    : const [],
-                              ),
-                            );
-                          },
-                        ),
-                      )
-                    : Padding(
-                        padding: const EdgeInsets.fromLTRB(44, 20, 44, 20),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Expanded(
-                              flex: 6,
-                              child: AnimatedBuilder(
-                                animation: Listenable.merge([
-                                  _isSavedNotifier,
-                                  _progressNotifier,
-                                ]),
-                                builder: (context, _) {
-                                  final progress = _progressNotifier.value;
-                                  final isSaved = _isSavedNotifier.value;
+                        return _EpisodesBottomPanel(
+                          seasons: seasons,
+                          selectedSeasonIndex: _selectedSeasonIndex,
+                          episodes: currentEpisodes,
+                          seasonFocusNodes: _seasonFocusNodes,
+                          episodeFocusNodes: _episodeFocusNodes,
+                          episodeScrollController: _episodeScrollController,
+                          onSeasonSelected: (i) =>
+                              _selectSeason(i, focusPreferredEpisode: false),
+                          onEpisodeTap: (epNumber) => _openServidores(
+                            temporada: currentSeasonNumber,
+                            capitulo: epNumber,
+                          ),
+                          onExitEpisodesView: _exitEpisodesView,
+                          onEpisodeFocusChanged: _handleEpisodeFocusChanged,
+                          onRequestRecommendations: _enterRecommendationsView,
+                          currentSeasonNumber: currentSeasonNumber,
+                          progressSeasonNumber: progTemp,
+                          progressEpisodeNumber: progCap,
+                          progressSeconds: (progSec != null && progSec > 5)
+                              ? progSec
+                              : null,
+                          allEpisodeProgress: _allEpisodeProgress,
+                          preferredEpisodeIndex: _preferredEpisodeIndexFor(
+                            currentSeasonNumber,
+                            currentEpisodes,
+                          ),
+                          seriesCast: List<Map<String, dynamic>>.from(
+                            (data['cast'] is List)
+                                ? data['cast'] as List
+                                : const [],
+                          ),
+                        );
+                      },
+                    ),
+                  )
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(44, 20, 44, 20),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          flex: 6,
+                          child: AnimatedBuilder(
+                            animation: Listenable.merge([
+                              _isSavedNotifier,
+                              _progressNotifier,
+                            ]),
+                            builder: (context, _) {
+                              final progress = _progressNotifier.value;
+                              final isSaved = _isSavedNotifier.value;
 
-                                  final int? resumeSec =
-                                      progress?['segundo'] as int?;
-                                  final int? resumeTemp =
-                                      progress?['temporada'] as int?;
-                                  final int? resumeCap =
-                                      progress?['capitulo'] as int?;
-                                  final bool hasProgress =
-                                      resumeSec != null && resumeSec > 5;
+                              final int? resumeSec =
+                                  progress?['segundo'] as int?;
+                              final int? resumeTemp =
+                                  progress?['temporada'] as int?;
+                              final int? resumeCap =
+                                  progress?['capitulo'] as int?;
+                              final bool hasProgress =
+                                  resumeSec != null && resumeSec > 5;
 
-                                  String playLabel;
+                              String playLabel;
+                              if (isMovie) {
+                                playLabel = hasProgress
+                                    ? 'Reanudar · ${_formatTime(resumeSec!)}'
+                                    : 'VER AHORA';
+                              } else {
+                                if (hasProgress &&
+                                    resumeTemp != null &&
+                                    resumeCap != null) {
+                                  playLabel =
+                                      'Reanudar · S${resumeTemp.toString().padLeft(2, '0')}E${resumeCap.toString().padLeft(2, '0')}';
+                                } else {
+                                  playLabel = currentEpisodes.isNotEmpty
+                                      ? 'Play Episodio ${currentEpisodes.first['episode_number'] ?? 1}'
+                                      : 'Reproducir';
+                                }
+                              }
+
+                              return _InfoColumn(
+                                title: title,
+                                logoUrl: logo,
+                                overview: overview,
+                                ratingValue: ratingValue,
+                                extraMeta: runtime != null
+                                    ? '$runtime min'
+                                    : null,
+                                year: year,
+                                genres: genres,
+                                playLabel: playLabel,
+                                playFocusNode: _playFocusNode,
+                                addFocusNode: _addFocusNode,
+                                randomFocusNode: _randomFocusNode,
+                                restartFocusNode: _restartFocusNode,
+                                letterboxdFocusNode: _letterboxdFocusNode,
+                                isSaved: isSaved,
+                                showLetterboxd: canShowLetterboxd,
+                                onPlay: () {
                                   if (isMovie) {
-                                    playLabel = hasProgress
-                                        ? 'Reanudar · ${_formatTime(resumeSec!)}'
-                                        : 'VER AHORA';
+                                    _openServidores();
                                   } else {
-                                    if (hasProgress &&
-                                        resumeTemp != null &&
-                                        resumeCap != null) {
-                                      playLabel =
-                                          'Reanudar · S${resumeTemp.toString().padLeft(2, '0')}E${resumeCap.toString().padLeft(2, '0')}';
-                                    } else {
-                                      playLabel = currentEpisodes.isNotEmpty
-                                          ? 'Play Episodio ${currentEpisodes.first['episode_number'] ?? 1}'
-                                          : 'Reproducir';
-                                    }
+                                    final temp =
+                                        (hasProgress && resumeTemp != null)
+                                        ? resumeTemp
+                                        : currentSeasonNumber;
+                                    final cap =
+                                        (hasProgress && resumeCap != null)
+                                        ? resumeCap
+                                        : (currentEpisodes.isNotEmpty
+                                              ? (currentEpisodes
+                                                        .first['episode_number'] ??
+                                                    1)
+                                              : 1);
+                                    _openServidores(
+                                      temporada: temp,
+                                      capitulo: cap,
+                                    );
                                   }
-
-                                  return _InfoColumn(
-                                    title: title,
-                                    logoUrl: logo,
-                                    overview: overview,
-                                    ratingValue: ratingValue,
-                                    extraMeta:
-                                        runtime != null ? '$runtime min' : null,
-                                    year: year,
-                                    genres: genres,
-                                    playLabel: playLabel,
-                                    playFocusNode: _playFocusNode,
-                                    addFocusNode: _addFocusNode,
-                                    randomFocusNode: _randomFocusNode,
-                                    restartFocusNode: _restartFocusNode,
-                                    letterboxdFocusNode: _letterboxdFocusNode,
-                                    isSaved: isSaved,
-                                    showLetterboxd: canShowLetterboxd,
-                                    onPlay: () {
-                                      if (isMovie) {
-                                        _openServidores();
-                                      } else {
-                                        final temp =
-                                            (hasProgress && resumeTemp != null)
-                                                ? resumeTemp
-                                                : currentSeasonNumber;
-                                        final cap =
-                                            (hasProgress && resumeCap != null)
-                                                ? resumeCap
-                                                : (currentEpisodes.isNotEmpty
-                                                    ? (currentEpisodes
-                                                            .first['episode_number'] ??
-                                                        1)
-                                                    : 1);
-                                        _openServidores(
-                                          temporada: temp,
-                                          capitulo: cap,
-                                        );
-                                      }
-                                    },
-                                    onToggleSaved: _toggleSaved,
-                                    onRandomEpisode: canRandomEpisode
-                                        ? _openRandomEpisode
-                                        : null,
-                                    onRestart:
-                                        hasProgress ? _restartAndPlay : null,
-                                    onLetterboxd:
-                                        canShowLetterboxd ? _openLetterboxdQr : null,
-                                    // Solo en TV: bajar desde "VER AHORA" abre la vista de capítulos.
-                                    onRequestEpisodesView:
-                                        isMovie ? null : _enterEpisodesView,
-                                    // Movie: bajar desde play abre recomendaciones.
-                                    onRequestRecommendations: isMovie
-                                        ? _enterRecommendationsView
-                                        : null,
-                                  );
                                 },
-                              ),
-                            ),
-                            const SizedBox(width: 36),
-                            Expanded(
-                              flex: 4,
-                              child: RepaintBoundary(
-                                child: Center(
-                                  child: AspectRatio(
-                                    aspectRatio: 2 / 3,
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: poster.isNotEmpty
-                                          ? CachedNetworkImage(
-                                              imageUrl: poster,
-                                              fit: BoxFit.cover,
-                                              memCacheWidth: posterMemW,
-                                              fadeInDuration: const Duration(
-                                                milliseconds: 180,
+                                onToggleSaved: _toggleSaved,
+                                onRandomEpisode: canRandomEpisode
+                                    ? _openRandomEpisode
+                                    : null,
+                                onRestart: hasProgress ? _restartAndPlay : null,
+                                onLetterboxd: canShowLetterboxd
+                                    ? _openLetterboxdQr
+                                    : null,
+                                // Solo en TV: bajar desde "VER AHORA" abre la vista de capítulos.
+                                onRequestEpisodesView: isMovie
+                                    ? null
+                                    : _enterEpisodesView,
+                                // Movie: bajar desde play abre recomendaciones.
+                                onRequestRecommendations: isMovie
+                                    ? _enterRecommendationsView
+                                    : null,
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 36),
+                        Expanded(
+                          flex: 4,
+                          child: RepaintBoundary(
+                            child: Center(
+                              child: AspectRatio(
+                                aspectRatio: 2 / 3,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: poster.isNotEmpty
+                                      ? CachedNetworkImage(
+                                          imageUrl: poster,
+                                          fit: BoxFit.cover,
+                                          memCacheWidth: posterMemW,
+                                          fadeInDuration: const Duration(
+                                            milliseconds: 180,
+                                          ),
+                                          placeholder: (_, __) => Container(
+                                            color: Colors.grey[900],
+                                            child: const Center(
+                                              child: CircularProgressIndicator(
+                                                color: Colors.white24,
                                               ),
-                                              placeholder: (_, __) => Container(
-                                                color: Colors.grey[900],
-                                                child: const Center(
-                                                  child: CircularProgressIndicator(
-                                                    color: Colors.white24,
-                                                  ),
-                                                ),
-                                              ),
-                                              errorWidget: (_, __, ___) =>
-                                                  Container(
+                                            ),
+                                          ),
+                                          errorWidget: (_, __, ___) =>
+                                              Container(
                                                 color: Colors.grey[900],
                                                 child: const Icon(
                                                   Icons.movie,
@@ -1553,23 +1599,23 @@ class _PageContenidoState extends State<PageContenido>
                                                   size: 48,
                                                 ),
                                               ),
-                                            )
-                                          : Container(
-                                              color: Colors.grey[900],
-                                              child: const Icon(
-                                                Icons.movie,
-                                                color: Colors.white24,
-                                                size: 48,
-                                              ),
-                                            ),
-                                    ),
-                                  ),
+                                        )
+                                      : Container(
+                                          color: Colors.grey[900],
+                                          child: const Icon(
+                                            Icons.movie,
+                                            color: Colors.white24,
+                                            size: 48,
+                                          ),
+                                        ),
                                 ),
                               ),
                             ),
-                          ],
+                          ),
                         ),
-                      ),
+                      ],
+                    ),
+                  ),
           ),
 
           // ---- notificación superior derecha (solo TV, dura 10s) ----
@@ -1579,7 +1625,8 @@ class _PageContenidoState extends State<PageContenido>
               right: 44,
               child: IgnorePointer(
                 child: AnimatedOpacity(
-                  opacity: (_showEpisodesHint &&
+                  opacity:
+                      (_showEpisodesHint &&
                           !episodesViewActive &&
                           !recoViewActive)
                       ? 1.0
@@ -2194,8 +2241,10 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
       _focusedEpisode = widget.episodes.first;
       return;
     }
-    final idx =
-        widget.preferredEpisodeIndex.clamp(0, widget.episodes.length - 1);
+    final idx = widget.preferredEpisodeIndex.clamp(
+      0,
+      widget.episodes.length - 1,
+    );
     _focusedEpisode = widget.episodes[idx];
   }
 
@@ -2387,7 +2436,8 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
           child: Row(
             children: List.generate(widget.seasons.length, (i) {
               final season = widget.seasons[i];
-              final name = season['name']?.toString() ??
+              final name =
+                  season['name']?.toString() ??
                   'Temporada ${season['season_number']}';
               final isSelected = i == widget.selectedSeasonIndex;
 
@@ -2537,14 +2587,13 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
 
                     final isCurrentProgress =
                         widget.progressEpisodeNumber != null &&
-                            widget.progressSeasonNumber ==
-                                widget.currentSeasonNumber &&
-                            itemNumber == widget.progressEpisodeNumber;
+                        widget.progressSeasonNumber ==
+                            widget.currentSeasonNumber &&
+                        itemNumber == widget.progressEpisodeNumber;
 
-                    final watchedInfo = widget.allEpisodeProgress[
-                        'S${widget.currentSeasonNumber}E$itemNumber'];
-                    final isWatched =
-                        watchedInfo != null && !isCurrentProgress;
+                    final watchedInfo = widget
+                        .allEpisodeProgress['S${widget.currentSeasonNumber}E$itemNumber'];
+                    final isWatched = watchedInfo != null && !isCurrentProgress;
 
                     final showProgressBar =
                         isCurrentProgress && widget.progressSeconds != null;
@@ -2564,9 +2613,9 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                             widget
                                 .seasonFocusNodes[widget.selectedSeasonIndex
                                     .clamp(
-                              0,
-                              widget.seasonFocusNodes.length - 1,
-                            )]
+                                      0,
+                                      widget.seasonFocusNodes.length - 1,
+                                    )]
                                 .requestFocus();
                           } else {
                             widget.onExitEpisodesView();
@@ -2582,8 +2631,7 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                           return KeyEventResult.handled;
                         }
 
-                        if (event.logicalKey ==
-                            LogicalKeyboardKey.arrowRight) {
+                        if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
                           if (index < widget.episodeFocusNodes.length - 1) {
                             widget.episodeFocusNodes[index + 1].requestFocus();
                             _scrollToIndex(index + 1);
@@ -2638,10 +2686,10 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                                         color: hasFocus
                                             ? Colors.white
                                             : (isCurrentProgress
-                                                ? kAccentColor.withValues(
-                                                    alpha: 0.65,
-                                                  )
-                                                : Colors.transparent),
+                                                  ? kAccentColor.withValues(
+                                                      alpha: 0.65,
+                                                    )
+                                                  : Colors.transparent),
                                         width: hasFocus ? 2.4 : 1.6,
                                       ),
                                     ),
@@ -2658,20 +2706,20 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                                                   memCacheHeight: stillMemH,
                                                   fadeInDuration:
                                                       const Duration(
-                                                    milliseconds: 120,
-                                                  ),
+                                                        milliseconds: 120,
+                                                      ),
                                                   placeholder: (_, __) =>
                                                       Container(
-                                                    color: Colors.grey[900],
-                                                  ),
+                                                        color: Colors.grey[900],
+                                                      ),
                                                   errorWidget: (_, __, ___) =>
                                                       Container(
-                                                    color: Colors.grey[900],
-                                                    child: const Icon(
-                                                      Icons.movie,
-                                                      color: Colors.white24,
-                                                    ),
-                                                  ),
+                                                        color: Colors.grey[900],
+                                                        child: const Icon(
+                                                          Icons.movie,
+                                                          color: Colors.white24,
+                                                        ),
+                                                      ),
                                                 )
                                               : Container(
                                                   color: Colors.grey[900],
@@ -2738,9 +2786,9 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                                                       Alignment.centerLeft,
                                                   widthFactor:
                                                       _progressFraction(
-                                                    item,
-                                                    widget.progressSeconds!,
-                                                  ),
+                                                        item,
+                                                        widget.progressSeconds!,
+                                                      ),
                                                   child: const ColoredBox(
                                                     color: kAccentColor,
                                                   ),
@@ -2762,14 +2810,12 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                                                       Alignment.centerLeft,
                                                   widthFactor:
                                                       _progressFraction(
-                                                    item,
-                                                    watchedInfo!.segundo,
-                                                  ),
+                                                        item,
+                                                        watchedInfo!.segundo,
+                                                      ),
                                                   child: ColoredBox(
                                                     color: Colors.white
-                                                        .withValues(
-                                                      alpha: 0.5,
-                                                    ),
+                                                        .withValues(alpha: 0.5),
                                                   ),
                                                 ),
                                               ),
@@ -2826,8 +2872,10 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                 ? const SizedBox.shrink()
                 : LayoutBuilder(
                     builder: (context, constraints) {
-                      final maxSynopsisH =
-                          (constraints.maxHeight * 0.55).clamp(36.0, 84.0);
+                      final maxSynopsisH = (constraints.maxHeight * 0.55).clamp(
+                        36.0,
+                        84.0,
+                      );
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
@@ -2857,8 +2905,7 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                                     vertical: 4,
                                   ),
                                   decoration: BoxDecoration(
-                                    color:
-                                        kAccentColor.withValues(alpha: 0.95),
+                                    color: kAccentColor.withValues(alpha: 0.95),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Text(
@@ -2875,8 +2922,7 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                                 Text(
                                   epAirDate,
                                   style: TextStyle(
-                                    color:
-                                        Colors.white.withValues(alpha: 0.72),
+                                    color: Colors.white.withValues(alpha: 0.72),
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -2885,8 +2931,7 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                                 Text(
                                   '$epRuntime min',
                                   style: TextStyle(
-                                    color:
-                                        Colors.white.withValues(alpha: 0.72),
+                                    color: Colors.white.withValues(alpha: 0.72),
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -3152,8 +3197,7 @@ class _RecommendationsPanel extends StatelessWidget {
               final isCollection = item['source'] == 'collection';
 
               return Focus(
-                focusNode:
-                    focusNodes.length > index ? focusNodes[index] : null,
+                focusNode: focusNodes.length > index ? focusNodes[index] : null,
                 onKeyEvent: (node, event) {
                   if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
@@ -3206,8 +3250,8 @@ class _RecommendationsPanel extends StatelessWidget {
                               color: hasFocus
                                   ? Colors.white
                                   : (isCollection
-                                      ? kAccentColor.withValues(alpha: 0.55)
-                                      : Colors.transparent),
+                                        ? kAccentColor.withValues(alpha: 0.55)
+                                        : Colors.transparent),
                               width: hasFocus ? 2.6 : 1.5,
                             ),
                             boxShadow: hasFocus
@@ -3236,11 +3280,9 @@ class _RecommendationsPanel extends StatelessWidget {
                                         fadeInDuration: const Duration(
                                           milliseconds: 140,
                                         ),
-                                        placeholder: (_, __) => Container(
-                                          color: Colors.grey[900],
-                                        ),
-                                        errorWidget: (_, __, ___) =>
-                                            Container(
+                                        placeholder: (_, __) =>
+                                            Container(color: Colors.grey[900]),
+                                        errorWidget: (_, __, ___) => Container(
                                           color: Colors.grey[900],
                                           child: const Icon(
                                             Icons.movie,
@@ -3319,10 +3361,8 @@ class _RecommendationsPanel extends StatelessWidget {
                               imageUrl: logo,
                               fit: BoxFit.contain,
                               alignment: Alignment.centerLeft,
-                              fadeInDuration:
-                                  const Duration(milliseconds: 160),
-                              placeholder: (_, __) =>
-                                  const SizedBox.shrink(),
+                              fadeInDuration: const Duration(milliseconds: 160),
+                              placeholder: (_, __) => const SizedBox.shrink(),
                               errorWidget: (_, __, ___) =>
                                   const SizedBox.shrink(),
                             )
