@@ -8,13 +8,153 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../data/aggregators/source_aggregator.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_content.dart';
 import '../../player/data/extractor.dart';
+import '../../player/presentation/player_page.dart'; // ← ajusta ruta
 import '../../downloads/presentation/extractor_download_page.dart';
 import '../../discover/presentation/source_discovery_page.dart';
 import 'server_preloader_service.dart';
+
 const _kAccent = Color(0xFFE50914);
 const _kOrange = Color(0xFFFF6B00);
 const _kCard = Color(0xFF1C1C1E);
 const _kBg = Color(0xFF0A0A0A);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CACHÉ M3U8 (1 hora, con timestamp POR ENTRADA)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class TvM3u8Entry {
+  final String m3u8;
+  final int ts;
+  const TvM3u8Entry(this.m3u8, this.ts);
+}
+
+class TvM3u8Cache {
+  TvM3u8Cache._();
+
+  static const int ttlMs = 60 * 60 * 1000; // 1 hora
+
+  static Future<void> _chain = Future<void>.value();
+
+  static Future<T> _serial<T>(Future<T> Function() task) {
+    final completer = Completer<T>();
+    _chain = _chain.then((_) async {
+      try {
+        completer.complete(await task());
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    });
+    return completer.future;
+  }
+
+  static String _key({
+    required int tmdbId,
+    required String tipo,
+    int season = 0,
+    int episode = 0,
+  }) =>
+      'm3u8_cache_v2_${tmdbId}_${tipo}_T${season}_C$episode';
+
+  static Map<String, TvM3u8Entry> _decode(String? raw) {
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      final map = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final out = <String, TvM3u8Entry>{};
+      map.forEach((k, v) {
+        if (v is Map) {
+          final m = v['m']?.toString() ?? '';
+          final t = v['t'];
+          if (m.isNotEmpty && t is int) out[k] = TvM3u8Entry(m, t);
+        }
+      });
+      return out;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static String _encode(Map<String, TvM3u8Entry> entries) => jsonEncode(
+        entries.map((k, v) => MapEntry(k, {'m': v.m3u8, 't': v.ts})),
+      );
+
+  static Future<Map<String, TvM3u8Entry>> load({
+    required int tmdbId,
+    required String tipo,
+    int season = 0,
+    int episode = 0,
+  }) =>
+      _serial(() async {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          final key = _key(
+            tmdbId: tmdbId,
+            tipo: tipo,
+            season: season,
+            episode: episode,
+          );
+          final all = _decode(prefs.getString(key));
+          final now = DateTime.now().millisecondsSinceEpoch;
+          final fresh = <String, TvM3u8Entry>{};
+          all.forEach((k, v) {
+            if (now - v.ts <= ttlMs) fresh[k] = v;
+          });
+          if (fresh.length != all.length) {
+            if (fresh.isEmpty) {
+              await prefs.remove(key);
+            } else {
+              await prefs.setString(key, _encode(fresh));
+            }
+          }
+          return fresh;
+        } catch (_) {
+          return <String, TvM3u8Entry>{};
+        }
+      });
+
+  static Future<void> save({
+    required int tmdbId,
+    required String tipo,
+    int season = 0,
+    int episode = 0,
+    required String embedUrl,
+    required String m3u8,
+  }) =>
+      _serial(() async {
+        if (embedUrl.isEmpty || m3u8.isEmpty) return;
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          final key = _key(
+            tmdbId: tmdbId,
+            tipo: tipo,
+            season: season,
+            episode: episode,
+          );
+          final now = DateTime.now().millisecondsSinceEpoch;
+          final all = _decode(prefs.getString(key))
+            ..removeWhere((_, v) => now - v.ts > ttlMs);
+          all[embedUrl] = TvM3u8Entry(m3u8, now);
+          await prefs.setString(key, _encode(all));
+        } catch (_) {}
+      });
+
+  static Future<void> clear({
+    required int tmdbId,
+    required String tipo,
+    int season = 0,
+    int episode = 0,
+  }) =>
+      _serial(() async {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove(_key(
+            tmdbId: tmdbId,
+            tipo: tipo,
+            season: season,
+            episode: episode,
+          ));
+        } catch (_) {}
+      });
+}
 
 /// Pestaña: FuenteId normal O String "custom_48392"
 class _TabKey {
@@ -471,6 +611,36 @@ class _ServidoresModalState extends State<ServidoresModal>
       }
       _syncTabs(reorderByContent: true);
     });
+    // Hidratar m3u8 frescos desde el caché por URL
+    unawaited(_hydrateM3u8FromCache());
+  }
+
+  Future<void> _hydrateM3u8FromCache() async {
+    final cache = await TvM3u8Cache.load(
+      tmdbId: _resolvedTmdbId,
+      tipo: _mediaType,
+      season: _isMovie ? 0 : _season,
+      episode: _isMovie ? 0 : _episode,
+    );
+    if (cache.isEmpty || !mounted) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    setState(() {
+      for (final s in _todos) {
+        final url = s['servidor_url']?.toString() ?? '';
+        final entry = cache[url];
+        if (entry != null && entry.m3u8.isNotEmpty) {
+          s['resolved_m3u8'] = entry.m3u8;
+          s['m3u8_ts'] = entry.ts;
+          s['verificado'] = true;
+        } else {
+          final ts = s['m3u8_ts'];
+          if (ts is! int || now - ts > TvM3u8Cache.ttlMs) {
+            s.remove('resolved_m3u8');
+            s.remove('m3u8_ts');
+          }
+        }
+      }
+    });
   }
 
   void _runManual() {
@@ -528,12 +698,34 @@ class _ServidoresModalState extends State<ServidoresModal>
               });
               return;
             }
-            if (event.servidor == null) return;
-            final map = event.servidor!;
+
+            final raw = event.servidor;
+            if (raw == null) return;
+
+            final map = Map<String, dynamic>.from(raw);
             final url = map['servidor_url']?.toString() ?? '';
             if (url.isEmpty || _seenUrls.contains(url)) return;
-            _seenUrls.add(url);
 
+            // m3u8 resuelto por el verificador → guardar con timestamp
+            final m3u8 = (event.resolvedM3u8 ??
+                    map['resolved_m3u8']?.toString() ??
+                    '')
+                .trim();
+            if (m3u8.isNotEmpty) {
+              map['resolved_m3u8'] = m3u8;
+              map['m3u8_ts'] = DateTime.now().millisecondsSinceEpoch;
+              map['verificado'] = true;
+              unawaited(TvM3u8Cache.save(
+                tmdbId: _resolvedTmdbId,
+                tipo: _mediaType,
+                season: _isMovie ? 0 : _season,
+                episode: _isMovie ? 0 : _episode,
+                embedUrl: url,
+                m3u8: m3u8,
+              ));
+            }
+
+            _seenUrls.add(url);
             setState(() {
               _addServerToBuckets(map, eventFuente: event.fuente);
               _maybeReorderTabs();
@@ -579,39 +771,90 @@ class _ServidoresModalState extends State<ServidoresModal>
     );
   }
 
-  Future<void> _openExtractor(Map<String, dynamic> servidor) async {
+  // ═════════════════════════════════════════════════════════════════════════
+  // Abrir servidor
+  //   · m3u8 vigente (caché 1 h) o URL directa → PLAYER
+  //   · m3u8 vencido / inexistente             → EXTRACTOR (WEBVIEW)
+  // ═════════════════════════════════════════════════════════════════════════
+
+  bool _isDirectUrl(String url) {
+    final l = url.toLowerCase();
+    return l.contains('.m3u8') || l.contains('.mp4');
+  }
+
+  bool _hasFreshM3u8(Map<String, dynamic> s) {
+    final m = s['resolved_m3u8']?.toString() ?? '';
+    if (m.isEmpty) return false;
+    final ts = s['m3u8_ts'];
+    if (ts is! int) return false;
+    return DateTime.now().millisecondsSinceEpoch - ts <= TvM3u8Cache.ttlMs;
+  }
+
+  /// true = va al PLAYER nativo. false = va al Extractor (WebView).
+  bool _esPlayer(Map<String, dynamic> s) {
+    if (_hasFreshM3u8(s)) return true;
+    final url = s['servidor_url']?.toString() ?? '';
+    return _isDirectUrl(url);
+  }
+
+  Future<void> _openServer(Map<String, dynamic> servidor) async {
     if (_navigating || !mounted) return;
     _navigating = true;
 
-    final url = servidor['servidor_url']?.toString() ??
-        servidor['resolved_m3u8']?.toString() ??
-        '';
+    final embedUrl = servidor['servidor_url']?.toString() ?? '';
     final nombre = servidor['servidor_nombre']?.toString() ?? 'Servidor';
     final idioma = servidor['idioma']?.toString();
+    final tituloFinal = _titulo.isNotEmpty
+        ? _titulo
+        : (widget.titulo?.isNotEmpty == true ? widget.titulo! : 'Contenido');
+
+    // m3u8 vigente (< 1h) desde el caché
+    var m3u8 = '';
+    if (embedUrl.isNotEmpty) {
+      final cache = await TvM3u8Cache.load(
+        tmdbId: _resolvedTmdbId,
+        tipo: _mediaType,
+        season: _isMovie ? 0 : _season,
+        episode: _isMovie ? 0 : _episode,
+      );
+      m3u8 = cache[embedUrl]?.m3u8 ?? '';
+    }
+    if (m3u8.isEmpty && _hasFreshM3u8(servidor)) {
+      m3u8 = servidor['resolved_m3u8'].toString();
+    }
+
+    final esDirecto = _isDirectUrl(embedUrl);
+    final esPlayer = m3u8.isNotEmpty || esDirecto;
+    final videoUrl = m3u8.isNotEmpty ? m3u8 : (esDirecto ? embedUrl : '');
 
     if (_cfg?.reutilizarUltimoEnlace == true) {
+      final toSave = Map<String, dynamic>.from(servidor);
+      if (m3u8.isNotEmpty) {
+        toSave['resolved_m3u8'] = m3u8;
+      } else {
+        toSave.remove('resolved_m3u8');
+      }
       await FuentesCache.saveLastLink(
         tmdbId: _resolvedTmdbId,
         tipo: _mediaType,
         season: _isMovie ? 0 : _season,
         episode: _isMovie ? 0 : _episode,
-        servidor: servidor,
+        servidor: toSave,
       );
     }
 
     if (!mounted) return;
 
-    final tituloFinal = _titulo.isNotEmpty
-        ? _titulo
-        : (widget.titulo?.isNotEmpty == true ? widget.titulo! : 'Contenido');
+    final nav = Navigator.of(context);
 
+    // ── Descarga: siempre al ExtractorDownloadPage ────────────────────
     if (widget.forDownload) {
       final downloadRoute = MaterialPageRoute(
         builder: (_) => ExtractorDownloadPage(
           idcontenido: widget.idcontenido,
           temporada: _isMovie ? null : widget.temporada,
           capitulo: _isMovie ? null : widget.capitulo,
-          servidorUrl: url,
+          servidorUrl: embedUrl,
           servidorNombre: nombre,
           tipo: _mediaType,
           titulo: tituloFinal,
@@ -622,37 +865,58 @@ class _ServidoresModalState extends State<ServidoresModal>
         ),
       );
       if (widget.fromPlayer) {
-        final navigator = Navigator.of(context);
-        navigator.pop();
-        navigator.pushReplacement(downloadRoute);
+        nav.pop();
+        nav.pushReplacement(downloadRoute);
       } else {
-        Navigator.of(context).pushReplacement(downloadRoute);
+        nav.pushReplacement(downloadRoute);
       }
+      _schedulePreload();
       return;
     }
 
+    // ── PLAYER nativo (m3u8 fresco o URL directa) ─────────────────────
+    if (esPlayer && videoUrl.isNotEmpty) {
+      final route = MaterialPageRoute(
+        builder: (_) => PlayerScreen(
+          videoUrl: videoUrl,
+          idcontenido: widget.idcontenido,
+          tmdbId: _resolvedTmdbId,
+          temporada: _isMovie ? null : widget.temporada,
+          capitulo: _isMovie ? null : widget.capitulo,
+          tipo: _mediaType,
+          titulo: tituloFinal,
+        ),
+      );
+      if (widget.fromPlayer) {
+        nav.pop();
+        nav.pushReplacement(route);
+      } else {
+        nav.pushReplacement(route);
+      }
+      _schedulePreload();
+      return;
+    }
+
+    // ── WEBVIEW (servidor válido pero m3u8 vencido/ausente) ───────────
     final extractorRoute = MaterialPageRoute(
       builder: (_) => ExtractorPage(
         idcontenido: widget.idcontenido,
         tmdbId: _resolvedTmdbId,
         temporada: _isMovie ? null : widget.temporada,
         capitulo: _isMovie ? null : widget.capitulo,
-        servidorUrl: url,
+        servidorUrl: embedUrl,
         servidorNombre: nombre,
         tipo: _mediaType,
         titulo: tituloFinal,
         idioma: idioma,
       ),
     );
-
     if (widget.fromPlayer) {
-      final navigator = Navigator.of(context);
-      navigator.pop();
-      navigator.pushReplacement(extractorRoute);
+      nav.pop();
+      nav.pushReplacement(extractorRoute);
     } else {
-      Navigator.of(context).pushReplacement(extractorRoute);
+      nav.pushReplacement(extractorRoute);
     }
-
     _schedulePreload();
   }
 
@@ -966,12 +1230,20 @@ class _ServidoresModalState extends State<ServidoresModal>
 
   Future<void> _onReload() async {
     _sub?.cancel();
-    await FuentesCache.clearFor(
-      tmdbId: _resolvedTmdbId,
-      tipo: _mediaType,
-      season: _isMovie ? 0 : _season,
-      episode: _isMovie ? 0 : _episode,
-    );
+    await Future.wait([
+      FuentesCache.clearFor(
+        tmdbId: _resolvedTmdbId,
+        tipo: _mediaType,
+        season: _isMovie ? 0 : _season,
+        episode: _isMovie ? 0 : _episode,
+      ),
+      TvM3u8Cache.clear(
+        tmdbId: _resolvedTmdbId,
+        tipo: _mediaType,
+        season: _isMovie ? 0 : _season,
+        episode: _isMovie ? 0 : _episode,
+      ),
+    ]);
     if (!mounted) return;
     setState(() {
       _error = null;
@@ -1037,7 +1309,6 @@ class _ServidoresModalState extends State<ServidoresModal>
                 false;
           } else if (t.isCustom) {
             count = _porCustom[t.customId]?.length ?? 0;
-            // custom: done cuando customapi terminó
             done = _fuenteDone[FuenteId.customapi] == true;
           } else {
             count = _porFuente[t.fuente]?.length ?? 0;
@@ -1178,11 +1449,22 @@ class _ServidoresModalState extends State<ServidoresModal>
       );
     }
 
+    // Agrupar por idioma
     final byLang = <String, List<Map<String, dynamic>>>{};
     for (final s in list) {
       final lang = MainFuentes.normalizeIdioma(s['idioma']?.toString());
       byLang.putIfAbsent(lang, () => []).add(s);
     }
+
+    // ★ ORDENAR: primero PLAYER, luego WEBVIEW
+    for (final entry in byLang.entries) {
+      entry.value.sort((a, b) {
+        final pa = _esPlayer(a) ? 0 : 1;
+        final pb = _esPlayer(b) ? 0 : 1;
+        return pa.compareTo(pb);
+      });
+    }
+
     final langKeys = byLang.keys.toList()
       ..sort((a, b) {
         const order = ['es_MX', 'es_ES', 'en_US', 'ja_JA'];
@@ -1307,6 +1589,7 @@ class _ServidoresModalState extends State<ServidoresModal>
     final verificado = s['verificado'] == true;
     final fuenteLabel = s['fuente_label']?.toString();
     final idioma = MainFuentes.normalizeIdioma(s['idioma']?.toString());
+    final esPlayer = _esPlayer(s);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -1315,7 +1598,7 @@ class _ServidoresModalState extends State<ServidoresModal>
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: () => _openExtractor(s),
+          onTap: () => _openServer(s),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
             child: Row(
@@ -1336,47 +1619,76 @@ class _ServidoresModalState extends State<ServidoresModal>
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 3),
+                      const SizedBox(height: 4),
                       Row(
                         children: [
-                          Text(
-                            MainFuentes.idiomaLabel(idioma),
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.55),
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
+                          // ★ ETIQUETA PLAYER / WEBVIEW
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: esPlayer
+                                  ? const Color(0xFF22C55E)
+                                      .withValues(alpha: 0.16)
+                                  : const Color(0xFF3B82F6)
+                                      .withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(5),
+                              border: Border.all(
+                                color: esPlayer
+                                    ? const Color(0xFF22C55E)
+                                        .withValues(alpha: 0.5)
+                                    : const Color(0xFF3B82F6)
+                                        .withValues(alpha: 0.5),
+                                width: 0.7,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  esPlayer
+                                      ? Icons.play_circle_fill_rounded
+                                      : Icons.language_rounded,
+                                  size: 11,
+                                  color: esPlayer
+                                      ? const Color(0xFF22C55E)
+                                      : const Color(0xFF3B82F6),
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  esPlayer ? 'PLAYER' : 'WEBVIEW',
+                                  style: TextStyle(
+                                    color: esPlayer
+                                        ? const Color(0xFF22C55E)
+                                        : const Color(0xFF3B82F6),
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.4,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          Text(
-                            '  ·  ',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.25),
-                            ),
-                          ),
-                          if (fuenteLabel != null) ...[
-                            Text(
-                              fuenteLabel,
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              [
+                                MainFuentes.idiomaLabel(idioma),
+                                if (fuenteLabel != null) fuenteLabel,
+                                calidad,
+                              ].join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.45),
+                                color: Colors.white.withValues(alpha: 0.5),
                                 fontSize: 11.5,
                               ),
                             ),
-                            Text(
-                              '  ·  ',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.25),
-                              ),
-                            ),
-                          ],
-                          Text(
-                            calidad,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.45),
-                              fontSize: 11.5,
-                            ),
                           ),
                           if (verificado) ...[
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 6),
                             Icon(
                               Icons.verified_rounded,
                               size: 14,

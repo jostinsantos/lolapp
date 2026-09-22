@@ -1,20 +1,14 @@
-// lib/player/servicio/extractor_hls.dart
-//
-// Extrae la fuente (m3u8/mp4) de un servidor SIN mostrar UI al usuario.
-// Ahora combina:
-//   1. Resolvers nativos (VOE, Doodstream, StreamWish, VidHide, etc.)
-//   2. WebView oculto 1x1 con detección avanzada (fetch/XHR, hls.js, jwplayer, etc.)
-//
-// Se usa desde ServidoresModal para filtrar servidores que sí tienen fuente reproducible.
-
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-
+import '../../player/presentation/player_page.dart'; // ← ajusta ruta
 // ============================================================
-//  RESULTADO Y RESOLVERS NATIVOS
+//  RESOLVERS NATIVOS (portados de fuegocine)
 // ============================================================
 
 class StreamResult {
@@ -37,6 +31,7 @@ class NativeResolvers {
   static const String _ua =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+  // Regex reutilizables (sin problemas de comillas en Dart)
   static final RegExp _reM3u8Any = RegExp(
     r'https?://[^\s"\x27]+\.m3u8[^\s"\x27]*',
     caseSensitive: false,
@@ -236,8 +231,6 @@ class NativeResolvers {
           return await _resolveBuzzheavier(url).timeout(timeout);
         case 'dropcdn':
           return await _resolveDropcdn(url).timeout(timeout);
-        case 'okru':
-          return await _resolveOkRu(url).timeout(timeout);
         default:
           return null;
       }
@@ -691,109 +684,6 @@ class NativeResolvers {
     );
   }
 
-  // ---------- OK.RU ----------
-  static const Map<String, String> _okruQuality = {
-    'mobile': '144p',
-    'lowest': '240p',
-    'low':    '360p',
-    'sd':     '480p',
-    'hd':     '720p',
-    'full':   '1080p',
-    'quad':   '1440p',
-    'ultra':  '2160p',
-  };
-
-  static Future<StreamResult?> _resolveOkRu(String url) async {
-    final res = await http.get(
-      Uri.parse(url),
-      headers: {
-        'User-Agent': _ua,
-        'Referer': url,
-      },
-    );
-    if (res.statusCode != 200) return null;
-
-    final html = res.body;
-
-    // 1) Extraer data-options
-    final m = RegExp(r'data-options="([^"]*)"').firstMatch(html);
-    if (m == null) return null;
-
-    final raw = _htmlDecode(m.group(1)!);
-    dynamic opt;
-    try {
-      opt = jsonDecode(raw);
-    } catch (_) {
-      return null;
-    }
-    if (opt is! Map) return null;
-
-    // 2) metadata puede venir como Map o como String JSON
-    dynamic meta;
-    try {
-      final md = (opt['flashvars'] is Map) ? opt['flashvars']['metadata'] : null;
-      if (md is Map) {
-        meta = md;
-      } else if (md is String) {
-        meta = jsonDecode(md);
-      }
-    } catch (_) {
-      return null;
-    }
-    if (meta is! Map) return null;
-
-    final headers = <String, String>{
-      'User-Agent': _ua,
-      'Referer': url,
-    };
-
-    // 3) HLS primero
-    final hls = meta['hlsMasterPlaylistUrl'] ??
-                meta['hlsManifestUrl'] ??
-                meta['ondemandHls'];
-    if (hls is String && hls.isNotEmpty) {
-      return StreamResult(
-        url: hls,
-        quality: 'auto',
-        serverName: 'OK.ru',
-        headers: headers,
-      );
-    }
-
-    // 4) MP4 progresivos
-    final videos = meta['videos'];
-    if (videos is List && videos.isNotEmpty) {
-      for (final v in videos) {
-        if (v is Map) {
-          final u = v['url'];
-          if (u is String && u.isNotEmpty && u.startsWith('http')) {
-            final name = (v['name'] ?? '').toString();
-            return StreamResult(
-              url: u,
-              quality: _okruQuality[name] ?? name,
-              serverName: 'OK.ru',
-              headers: headers,
-            );
-          }
-        }
-      }
-    }
-
-    return null;
-  }
-
-  /// Decodifica entidades HTML básicas que aparecen dentro de data-options.
-  static String _htmlDecode(String input) {
-    return input
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#34;', '"')
-        .replaceAll('&#39;', "'")
-        .replaceAll('&apos;', "'")
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&amp;', '&');
-  }
-
   // ---------- HELPERS ----------
   static String _padB64(String s) {
     final pad = (4 - s.length % 4) % 4;
@@ -852,114 +742,143 @@ class NativeResolvers {
 }
 
 // ============================================================
-//  SERVICIO PRINCIPAL (filtro de servidores)
+//  EXTRACTOR PAGE
 // ============================================================
 
-class ExtractorHlsService {
-  ExtractorHlsService._();
-
-  /// Devuelve la URL absoluta de la fuente encontrada, o null si no
-  /// se encontró nada dentro de [timeout].
-  /// 
-  /// Orden de intento:
-  /// 1. Resolvers nativos (rápido)
-  /// 2. WebView oculto 1x1 (detección avanzada)
-  static Future<String?> buscarFuente(
-    BuildContext context,
-    String servidorUrl, {
-    Duration timeout = const Duration(seconds: 10),
-  }) async {
-    // 1. Primero intentamos con resolvers nativos (mucho más rápido)
-    try {
-      final native = await NativeResolvers.resolve(
-        servidorUrl,
-        timeout: const Duration(seconds: 6),
-      );
-      if (native != null && native.url.isNotEmpty) {
-        return native.url;
-      }
-    } catch (_) {}
-
-    // 2. Si el nativo falla, usamos el WebView oculto
-    final overlay = Overlay.maybeOf(context, rootOverlay: true);
-    if (overlay == null) return null;
-
-    final completer = Completer<String?>();
-    late OverlayEntry entry;
-    var resuelto = false;
-
-    void resolver(String? url) {
-      if (resuelto) return;
-      resuelto = true;
-      try {
-        entry.remove();
-      } catch (_) {}
-      if (!completer.isCompleted) completer.complete(url);
-    }
-
-    entry = OverlayEntry(
-      builder: (_) => Positioned(
-        left: -5,
-        top: -5,
-        width: 1,
-        height: 1,
-        child: IgnorePointer(
-          child: Opacity(
-            opacity: 0.0,
-            child: _HiddenProbe(
-              servidorUrl: servidorUrl,
-              timeout: timeout,
-              onResult: resolver,
-            ),
-          ),
-        ),
-      ),
-    );
-
-    overlay.insert(entry);
-    return completer.future;
-  }
-}
-
-// ============================================================
-//  WEBVIEW OCULTO (detección avanzada)
-// ============================================================
-
-class _HiddenProbe extends StatefulWidget {
+class ExtractorPage extends StatefulWidget {
+  final int idcontenido;
+  final int? tmdbId;
+  final int? temporada;
+  final int? capitulo;
   final String servidorUrl;
-  final Duration timeout;
-  final ValueChanged<String?> onResult;
+  final String servidorNombre;
+  final String tipo;
+  final String titulo;
+  final int? idServidor;
+  final String? idioma;
 
-  const _HiddenProbe({
+  const ExtractorPage({
+    super.key,
+    required this.idcontenido,
+    this.tmdbId,
+    this.temporada,
+    this.capitulo,
     required this.servidorUrl,
-    required this.timeout,
-    required this.onResult,
+    required this.servidorNombre,
+    required this.tipo,
+    required this.titulo,
+    this.idServidor,
+    this.idioma,
   });
 
   @override
-  State<_HiddenProbe> createState() => _HiddenProbeState();
+  State<ExtractorPage> createState() => _ExtractorPageState();
 }
 
-class _HiddenProbeState extends State<_HiddenProbe> {
-  late final WebViewController _controller;
-  final Set<String> _detectadas = {};
-  Timer? _timeoutTimer;
-  bool _resuelto = false;
+class _ExtractorPageState extends State<ExtractorPage>
+    with WidgetsBindingObserver {
+  static const String _kHostCacheKey = 'extractor_host_methods';
+  static const String _kMethodWebview = 'webview_media_detector';
+  static const String _kMethodNative = 'native_resolver';
+
+  late final String initialUrl;
+  late final String _hostKey;
+  late WebViewController _webViewController;
+  final Set<String> detectedUrls = {};
+  bool isSearching = true;
+  bool showWebView = false;
+  String? selectedM3u8Url;
+  Timer? _searchTimer;
+  bool _isNavigating = false;
+  bool _detectionStopped = false;
+  bool _hostKnown = false;
+  String? _cachedMethod;
+  bool _nativeTried = false;
+
+  int get _resolvedTmdbId => widget.tmdbId ?? widget.idcontenido;
 
   @override
   void initState() {
     super.initState();
+    initialUrl = widget.servidorUrl;
+    _hostKey = _extractHost(initialUrl);
+    WidgetsBinding.instance.addObserver(this);
+    _lockToLandscape();
+    _loadHostCache().then((_) {
+      _initWebView();
+      if (_cachedMethod == _kMethodNative) {
+        _tryNativeResolver(early: true);
+      }
+    });
+  }
 
-    _controller = WebViewController()
+  String _extractHost(String url) {
+    try {
+      final uri = Uri.parse(url);
+      var host = uri.host.toLowerCase();
+      if (host.startsWith('www.')) host = host.substring(4);
+      return host;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> _loadHostCache() async {
+    if (_hostKey.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kHostCacheKey);
+      if (raw == null || raw.isEmpty) return;
+      final map = Map<String, dynamic>.from(jsonDecode(raw));
+      final entry = map[_hostKey];
+      if (entry is Map) {
+        _cachedMethod = entry['method']?.toString();
+        _hostKnown = _cachedMethod != null && _cachedMethod!.isNotEmpty;
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveHostMethod(String method) async {
+    if (_hostKey.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kHostCacheKey);
+      final map = raw != null && raw.isNotEmpty
+          ? Map<String, dynamic>.from(jsonDecode(raw))
+          : <String, dynamic>{};
+      map[_hostKey] = {
+        'method': method,
+        'servidor': widget.servidorNombre,
+        'ts': DateTime.now().toIso8601String(),
+      };
+      await prefs.setString(_kHostCacheKey, jsonEncode(map));
+      _cachedMethod = method;
+      _hostKnown = true;
+    } catch (_) {}
+  }
+
+  Future<void> _tryNativeResolver({bool early = false}) async {
+    if (_nativeTried || _isNavigating || _detectionStopped) return;
+    _nativeTried = true;
+
+    final result = await NativeResolvers.resolve(initialUrl);
+    if (result != null && result.url.isNotEmpty && mounted && !_isNavigating) {
+      selectedM3u8Url = result.url;
+      await _saveHostMethod(_kMethodNative);
+      _tryNavigateToPlayer();
+    }
+  }
+
+  void _initWebView() {
+    _webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent(
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-        '(KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
       )
       ..addJavaScriptChannel(
         'MediaDetector',
         onMessageReceived: (JavaScriptMessage message) {
-          if (_resuelto) return;
+          if (_detectionStopped || _isNavigating) return;
           final url = message.message.trim();
           if (url.isNotEmpty && _isMediaUrl(url)) {
             _addDetectedUrl(url);
@@ -968,17 +887,21 @@ class _HiddenProbeState extends State<_HiddenProbe> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
+          onPageStarted: (_) {
+            if (mounted) setState(() {});
+          },
           onPageFinished: (_) {
-            if (_resuelto) return;
+            if (_detectionStopped || _isNavigating) return;
             _injectPowerfulMediaDetector();
+            _startPeriodicSearch();
           },
           onNavigationRequest: (request) {
-            if (_resuelto) return NavigationDecision.prevent;
-            final uri = Uri.tryParse(request.url);
-            final baseUri = Uri.tryParse(widget.servidorUrl);
-            if (uri != null &&
-                baseUri != null &&
-                (uri.host == baseUri.host || uri.host.isEmpty)) {
+            if (_detectionStopped || _isNavigating) {
+              return NavigationDecision.prevent;
+            }
+            final uri = Uri.parse(request.url);
+            final baseUri = Uri.parse(initialUrl);
+            if (uri.host == baseUri.host || uri.host.isEmpty) {
               if (_isMediaUrl(request.url)) {
                 _addDetectedUrl(request.url);
               }
@@ -988,11 +911,9 @@ class _HiddenProbeState extends State<_HiddenProbe> {
           },
         ),
       )
-      ..loadRequest(Uri.parse(widget.servidorUrl));
+      ..loadRequest(Uri.parse(initialUrl));
 
-    _timeoutTimer = Timer(widget.timeout, () {
-      if (!_resuelto) _finalizar(null);
-    });
+    if (mounted) setState(() {});
   }
 
   bool _isMediaUrl(String url) {
@@ -1010,46 +931,92 @@ class _HiddenProbeState extends State<_HiddenProbe> {
     try {
       final uri = Uri.tryParse(url);
       if (uri != null && uri.isAbsolute) return url;
-      return Uri.parse(widget.servidorUrl).resolve(url).toString();
+      return Uri.parse(initialUrl).resolve(url).toString();
     } catch (_) {
       return url;
     }
   }
 
   void _addDetectedUrl(String url) {
-    if (_resuelto) return;
+    if (_isNavigating || _detectionStopped) return;
+
     final absoluteUrl = _toAbsoluteUrl(url);
-    if (_detectadas.add(absoluteUrl)) {
-      if (absoluteUrl.contains('.m3u8') || absoluteUrl.contains('.mp4')) {
-        _finalizar(absoluteUrl);
+    if (detectedUrls.add(absoluteUrl)) {
+      if (absoluteUrl.contains('.m3u8') ||
+          (selectedM3u8Url == null && absoluteUrl.contains('.mp4'))) {
+        selectedM3u8Url = absoluteUrl;
+        _saveHostMethod(_kMethodWebview);
+        _tryNavigateToPlayer();
       }
     }
   }
 
-  void _finalizar(String? url) {
-    if (_resuelto) return;
-    _resuelto = true;
-    _timeoutTimer?.cancel();
-    _stopDetectionJs();
-    widget.onResult(url);
-  }
-
   void _stopDetectionJs() {
     try {
-      _controller.runJavaScript('''
+      _webViewController.runJavaScript('''
         (function() {
-          if (window.__mdCleanup) { try { window.__mdCleanup(); } catch(e) {} }
+          if (window.__mdCleanup) {
+            try { window.__mdCleanup(); } catch(e) {}
+          }
           document.querySelectorAll('video').forEach(v => { try { v.pause(); } catch(e) {} });
         })();
       ''');
-      _controller.loadRequest(Uri.parse('about:blank'));
     } catch (_) {}
   }
 
+  void _tryNavigateToPlayer() {
+    if (selectedM3u8Url != null && mounted && !_isNavigating) {
+      _isNavigating = true;
+      _detectionStopped = true;
+      _searchTimer?.cancel();
+      _stopDetectionJs();
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PlayerScreen(
+            videoUrl: selectedM3u8Url!,
+            idcontenido: widget.idcontenido,
+            tmdbId: _resolvedTmdbId,
+            temporada: widget.temporada,
+            capitulo: widget.capitulo,
+            tipo: widget.tipo,
+            titulo: widget.titulo,
+            idioma: widget.idioma,
+          ),
+        ),
+      );
+    }
+  }
+
+  void _lockToLandscape() {
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  void _unlockOrientation() {
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  }
+
   void _injectPowerfulMediaDetector() {
-    _controller.runJavaScript('''
+    final aggressive = _hostKnown && _cachedMethod == _kMethodWebview;
+    final intervalMs = aggressive ? 1800 : 3500;
+
+    _webViewController.runJavaScript('''
       (function() {
-        if (window.__mdCleanup) { try { window.__mdCleanup(); } catch(e) {} }
+        if (window.__mdCleanup) {
+          try { window.__mdCleanup(); } catch(e) {}
+        }
+
         let stopped = false;
         const urls = new Set();
 
@@ -1119,7 +1086,9 @@ class _HiddenProbeState extends State<_HiddenProbe> {
                 ['video','audio','xmlhttprequest','other'].includes(type) ||
                 url.includes('.m3u8') || url.includes('.mp4') ||
                 url.includes('.ts') || url.includes('.m4s')
-              ) { sendUrl(url); }
+              ) {
+                sendUrl(url);
+              }
             });
           } catch(e) {}
 
@@ -1131,7 +1100,7 @@ class _HiddenProbeState extends State<_HiddenProbe> {
           } catch(e) {}
         };
         combinedCheck();
-        const mdInterval = setInterval(combinedCheck, 3500);
+        const mdInterval = setInterval(combinedCheck, $intervalMs);
 
         try {
           if (window.jwplayer) {
@@ -1153,7 +1122,9 @@ class _HiddenProbeState extends State<_HiddenProbe> {
         } catch(e) {}
 
         try {
-          if (window._mutationObserver) { window._mutationObserver.disconnect(); }
+          if (window._mutationObserver) {
+            window._mutationObserver.disconnect();
+          }
           window._mutationObserver = new MutationObserver(() => {
             if (stopped) return;
             document.querySelectorAll('video, source').forEach(el => {
@@ -1179,19 +1150,176 @@ class _HiddenProbeState extends State<_HiddenProbe> {
     ''');
   }
 
+  void _startPeriodicSearch() {
+    _searchTimer?.cancel();
+    final timeoutSec = _hostKnown ? 7 : 12;
+    _searchTimer = Timer(Duration(seconds: timeoutSec), () {
+      if (mounted &&
+          selectedM3u8Url == null &&
+          !_isNavigating &&
+          !_detectionStopped) {
+        _tryNativeResolver().then((_) {
+          if (mounted &&
+              selectedM3u8Url == null &&
+              !_isNavigating &&
+              !_detectionStopped) {
+            setState(() {
+              isSearching = false;
+              showWebView = true;
+            });
+          }
+        });
+      }
+    });
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    _lockToLandscape();
+  }
+
   @override
   void dispose() {
-    _timeoutTimer?.cancel();
-    if (!_resuelto) _stopDetectionJs();
+    WidgetsBinding.instance.removeObserver(this);
+    _searchTimer?.cancel();
+    _detectionStopped = true;
+
+    if (!_isNavigating) {
+      _unlockOrientation();
+    }
+
+    _stopDetectionJs();
+    try {
+      _webViewController.loadRequest(Uri.parse('about:blank'));
+    } catch (_) {}
+
     super.dispose();
+  }
+
+  Widget _buildBackButton() {
+    final topPad = MediaQuery.paddingOf(context).top;
+    return Positioned(
+      top: topPad + 12,
+      left: 16,
+      child: ClipOval(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Material(
+            color: Colors.black.withValues(alpha: 0.35),
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () {
+                _unlockOrientation();
+                Navigator.pop(context);
+              },
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    width: 1,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.arrow_back_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 1,
-      height: 1,
-      child: WebViewWidget(controller: _controller),
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          if (showWebView) WebViewWidget(controller: _webViewController),
+          if (isSearching && !_isNavigating)
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 6,
+                  ),
+                  if (_hostKnown) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      _cachedMethod == _kMethodNative
+                          ? 'Host conocido · resolver nativo'
+                          : 'Host conocido · extracción rápida',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.55),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          if (showWebView && !_isNavigating) _buildBackButton(),
+          if (selectedM3u8Url != null && !_isNavigating)
+            Container(
+              color: Colors.black87,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.check_circle,
+                      color: Colors.green,
+                      size: 90,
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      '¡Stream encontrado!',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 26,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      '${widget.titulo}${widget.temporada != null && widget.capitulo != null ? ' - T${widget.temporada?.toString().padLeft(2, '0')}C${widget.capitulo?.toString().padLeft(2, '0')}' : ''}',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 40),
+                    ElevatedButton.icon(
+                      onPressed: _tryNavigateToPlayer,
+                      icon: const Icon(Icons.play_arrow, size: 30),
+                      label: const Text(
+                        'Reproducir',
+                        style: TextStyle(fontSize: 20),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 48,
+                          vertical: 18,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

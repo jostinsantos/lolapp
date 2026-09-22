@@ -24,8 +24,10 @@ import '../extractors/providers/fuegocine_extractor.dart';
 import '../extractors/providers/pelispedia_extractor.dart';
 import '../extractors/providers/seriesmetro_extractor.dart';
 import '../extractors/providers/smartpelis_extractor.dart';
+import '../extractors/providers/cinesrc_extractor.dart';
 import '../datasources/remote/sources/custom_api.dart';
 import '../extractors/hls/hls_extractor.dart';
+
 // ─────────────────────────────────────────────────────────────
 // Enums de configuración (alineados con FuentesSection)
 // ─────────────────────────────────────────────────────────────
@@ -72,6 +74,7 @@ enum FuenteId {
   pelispedia,
   seriesmetro,
   smartpelis,
+  cinesrc,
   customapi, // APIs del usuario (códigos PHP ilimitados)
 }
 
@@ -100,6 +103,8 @@ extension FuenteIdX on FuenteId {
         return 'SeriesMetro';
       case FuenteId.smartpelis:
         return 'SmartPelis';
+      case FuenteId.cinesrc:
+        return 'CineSrc';
       case FuenteId.customapi:
         return 'Mis APIs';
     }
@@ -129,6 +134,8 @@ extension FuenteIdX on FuenteId {
         return 'es_seriesmetro';
       case FuenteId.smartpelis:
         return 'es_smartpelis';
+      case FuenteId.cinesrc:
+        return 'es_cinesrc';
       case FuenteId.customapi:
         return 'es_customapi';
     }
@@ -158,6 +165,8 @@ extension FuenteIdX on FuenteId {
         return const Color(0xFF6366F1);
       case FuenteId.smartpelis:
         return const Color(0xFFF97316);
+      case FuenteId.cinesrc:
+        return const Color(0xFFEF4444);
       case FuenteId.customapi:
         return const Color(0xFF60A5FA);
     }
@@ -179,6 +188,7 @@ class FuentesConfig {
   final bool pelispediaEnabled;
   final bool seriesmetroEnabled;
   final bool smartpelisEnabled;
+  final bool cinesrcEnabled;
   final bool customApiEnabled;
 
   final bool verificarServidores;
@@ -201,6 +211,7 @@ class FuentesConfig {
     required this.pelispediaEnabled,
     required this.seriesmetroEnabled,
     required this.smartpelisEnabled,
+    required this.cinesrcEnabled,
     required this.customApiEnabled,
     required this.verificarServidores,
     required this.unServidorPorIdioma,
@@ -235,6 +246,7 @@ class FuentesConfig {
       pelispediaEnabled: prefs.getBool('pelispedia_enabled') ?? false,
       seriesmetroEnabled: prefs.getBool('seriesmetro_enabled') ?? false,
       smartpelisEnabled: prefs.getBool('smartpelis_enabled') ?? false,
+      cinesrcEnabled: prefs.getBool('cinesrc_enabled') ?? false,
       customApiEnabled: prefs.getBool('custom_api_enabled') ?? false,
       verificarServidores: prefs.getBool('verificar_servidores') ?? true,
       unServidorPorIdioma: prefs.getBool('un_servidor_por_idioma') ?? true,
@@ -263,6 +275,7 @@ class FuentesConfig {
     if (pelispediaEnabled) list.add(FuenteId.pelispedia);
     if (seriesmetroEnabled) list.add(FuenteId.seriesmetro);
     if (smartpelisEnabled) list.add(FuenteId.smartpelis);
+    if (cinesrcEnabled) list.add(FuenteId.cinesrc);
     if (customApiEnabled) list.add(FuenteId.customapi);
     return list;
   }
@@ -673,6 +686,16 @@ class MainFuentes {
         break;
       case FuenteId.smartpelis:
         await for (final s in SmartPelisService.scrape(
+          tmdbId: tmdbId,
+          isMovie: isMovie,
+          season: season,
+          episode: episode,
+        )) {
+          yield s.toModalMap();
+        }
+        break;
+      case FuenteId.cinesrc:
+        await for (final s in CineSrcService.scrape(
           tmdbId: tmdbId,
           isMovie: isMovie,
           season: season,

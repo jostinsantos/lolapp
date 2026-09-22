@@ -1,5 +1,3 @@
-
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
@@ -14,6 +12,8 @@ import '../../../data/datasources/remote/tmdb/tmdb_content.dart';
 import '../../player/data/extractor.dart';
 import '../../player/presentation/tv/tv_player_page.dart';
 import 'tv_server_preloader_service.dart';
+import '../../player/presentation/tv/tv_player_webview.dart';
+
 const _kAccent = Color(0xFFE50914);
 const _kOrange = Color(0xFFFF6B00);
 const _kPanel = Color(0x1A141416);
@@ -23,11 +23,10 @@ const _kGreen = Color(0xFF22C55E);
 const _kBlue = Color(0xFF3B82F6);
 const double _kItemExtent = 78.0;
 
-/// Ocultar pestañas de fuentes que terminaron sin ningún servidor válido.
 const bool _kHideEmptyTabs = true;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CACHÉ 2 · M3U8 (1 hora, con timestamp POR ENTRADA)
+// CACHÉ 2 · M3U8 (1 hora)
 // ═══════════════════════════════════════════════════════════════════════════
 
 class TvM3u8Entry {
@@ -36,14 +35,11 @@ class TvM3u8Entry {
   const TvM3u8Entry(this.m3u8, this.ts);
 }
 
-/// Público a propósito: el Extractor puede llamar a
-/// `TvM3u8Cache.save(...)` cuando saque un m3u8 nuevo.
 class TvM3u8Cache {
   TvM3u8Cache._();
 
-  static const int ttlMs = 60 * 60 * 1000; // 1 hora
+  static const int ttlMs = 60 * 60 * 1000;
 
-  // Cola para evitar carreras de lectura/escritura
   static Future<void> _chain = Future<void>.value();
 
   static Future<T> _serial<T>(Future<T> Function() task) {
@@ -88,7 +84,6 @@ class TvM3u8Cache {
         entries.map((k, v) => MapEntry(k, {'m': v.m3u8, 't': v.ts})),
       );
 
-  /// Devuelve SOLO las entradas frescas (< 1 hora) y limpia las vencidas.
   static Future<Map<String, TvM3u8Entry>> load({
     required int tmdbId,
     required String tipo,
@@ -169,14 +164,12 @@ class TvM3u8Cache {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CACHÉ 1 · SERVIDORES VÁLIDOS (2 días, SIN m3u8)
+// CACHÉ 1 · SERVIDORES (2 días)
 // ═══════════════════════════════════════════════════════════════════════════
 
 class TvCachedServers {
   final List<Map<String, dynamic>> servers;
   final int ageMs;
-
-  /// true = terminó el scrape de todas las fuentes cuando se guardó.
   final bool complete;
 
   const TvCachedServers(this.servers, this.ageMs, this.complete);
@@ -185,7 +178,7 @@ class TvCachedServers {
 class TvServersCache {
   TvServersCache._();
 
-  static const int ttlMs = 2 * 24 * 60 * 60 * 1000; // 2 días
+  static const int ttlMs = 2 * 24 * 60 * 60 * 1000;
 
   static String _key({
     required int tmdbId,
@@ -195,8 +188,6 @@ class TvServersCache {
   }) =>
       'tv_valid_servers_v1_${tmdbId}_${tipo}_${season}_$episode';
 
-  /// Guarda solo servidores válidos. El m3u8 NUNCA se guarda aquí
-  /// (vive en TvM3u8Cache con su propio vencimiento de 1 hora).
   static Future<void> save({
     required int tmdbId,
     required String tipo,
@@ -211,7 +202,6 @@ class TvServersCache {
         final m = Map<String, dynamic>.from(s);
         m.remove('resolved_m3u8');
         m.remove('m3u8_ts');
-        m['verificado'] = true;
         return m;
       }).toList();
       await prefs.setString(
@@ -274,8 +264,7 @@ class TvServersCache {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Pestaña: FuenteId normal O código de Mis APIs ("custom_48392")
-// (misma lógica que el modal móvil)
+// Pestañas
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _TabKey {
@@ -378,11 +367,9 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
   bool _scraping = false;
   bool _navigating = false;
 
-  /// Todas las fuentes terminaron (o el caché guardado estaba completo)
   bool _scrapeComplete = false;
   bool _finishHandled = false;
 
-  /// Hay servidores nuevos sin guardar en caché
   bool _dirty = false;
   Timer? _persistTimer;
 
@@ -391,10 +378,7 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
   String? _logo;
   String _titulo = '';
 
-  // ── Datos (SOLO servidores válidos) ─────────────────────────────────────
   final Map<FuenteId, List<Map<String, dynamic>>> _porFuente = {};
-
-  /// Cada código de Mis APIs = lista propia (pestaña independiente)
   final Map<String, List<Map<String, dynamic>>> _porCustom = {};
   final Map<String, String> _customLabels = {};
   final Map<String, Color> _customColors = {};
@@ -405,16 +389,16 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
   final Map<FuenteId, bool> _fuenteDone = {};
   final Map<FuenteId, String?> _fuenteError = {};
 
-  // ── Pestañas ────────────────────────────────────────────────────────────
   List<_TabKey> _tabs = [const _TabKey.todos()];
   int _selectedTab = 0;
 
-  StreamSubscription<FuenteEvent>? _sub;
+  /// Dos streams: listado + verificación
+  final List<StreamSubscription<FuenteEvent>> _subs = [];
+
   int? _resumeSec;
   bool _fromCache = false;
   String? _cacheAgeLabel;
 
-  // ── Foco (D-pad) ────────────────────────────────────────────────────────
   final FocusNode _closeFocus = FocusNode(debugLabel: 'close');
   final FocusNode _reloadFocus = FocusNode(debugLabel: 'reload');
   final List<FocusNode> _tabFocus = [];
@@ -423,7 +407,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
   final ScrollController _tabsScroll = ScrollController();
   int _lastCardIndex = 0;
 
-  // ── Getters ─────────────────────────────────────────────────────────────
   int get _resolvedTmdbId => widget.tmdbId ?? widget.idcontenido;
 
   String get _mediaType {
@@ -440,24 +423,37 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
   int get _season => widget.temporada ?? 1;
   int get _episode => widget.capitulo ?? 1;
 
-  /// Season / episode usados como clave de caché (0 en películas)
   int get _cSeason => _isMovie ? 0 : _season;
   int get _cEpisode => _isMovie ? 0 : _episode;
 
   List<Map<String, dynamic>> _listFor(_TabKey tab) {
-    if (tab.isTodos) return _todos;
-    if (tab.isCustom) return _porCustom[tab.customId] ?? const [];
-    return _porFuente[tab.fuente] ?? const [];
+    List<Map<String, dynamic>> raw;
+    if (tab.isTodos) {
+      raw = _todos;
+    } else if (tab.isCustom) {
+      raw = _porCustom[tab.customId] ?? const [];
+    } else {
+      raw = _porFuente[tab.fuente] ?? const [];
+    }
+    // PLAYER primero, WEBVIEW al final
+    return List<Map<String, dynamic>>.from(raw)
+      ..sort((a, b) {
+        final aPlayer = _isPlayerServer(a);
+        final bPlayer = _isPlayerServer(b);
+        if (aPlayer == bPlayer) return 0;
+        return aPlayer ? -1 : 1;
+      });
   }
 
   List<Map<String, dynamic>> get _currentList {
-    if (_tabs.isEmpty) return _todos;
+    if (_tabs.isEmpty) return _listFor(const _TabKey.todos());
     return _listFor(_tabs[_selectedTab.clamp(0, _tabs.length - 1)]);
   }
 
-  // ═════════════════════════════════════════════════════════════════════════
-  // Ciclo de vida
-  // ═════════════════════════════════════════════════════════════════════════
+  bool _isPlayerServer(Map<String, dynamic> s) {
+    final url = s['servidor_url']?.toString() ?? '';
+    return _hasFreshM3u8(s) || _isDirectUrl(url);
+  }
 
   @override
   void initState() {
@@ -477,10 +473,11 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
 
   @override
   void dispose() {
-    _sub?.cancel();
+    for (final s in _subs) {
+      s.cancel();
+    }
+    _subs.clear();
     _persistTimer?.cancel();
-    // Guardar lo que haya quedado pendiente (p. ej. si el usuario salió antes
-    // de que terminara el scrape).
     if (_dirty && _todos.isNotEmpty) {
       unawaited(_persistNow());
     }
@@ -496,10 +493,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     }
     super.dispose();
   }
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // Nodos de foco (solo crecen; se reutilizan por índice)
-  // ═════════════════════════════════════════════════════════════════════════
 
   void _ensureTabNodes() {
     while (_tabFocus.length < _tabs.length) {
@@ -521,10 +514,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     });
   }
 
-  // ═════════════════════════════════════════════════════════════════════════
-  // Pestañas (misma lógica que móvil: Todos + fuentes + 1 pestaña por API)
-  // ═════════════════════════════════════════════════════════════════════════
-
   Color _parseColor(String? hex) {
     try {
       var h = (hex ?? '').trim();
@@ -536,11 +525,9 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     return const Color(0xFF60A5FA);
   }
 
-  /// Llamar SIEMPRE dentro de un setState().
   void _syncTabs() {
     final activas = _cfg?.fuentesActivas ?? <FuenteId>[];
 
-    // "Mis APIs" genérica no tiene pestaña: se reemplaza por 1 por código
     final withContent = <FuenteId>[];
     final empty = <FuenteId>[];
     for (final f in activas) {
@@ -548,7 +535,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
       if ((_porFuente[f]?.length ?? 0) > 0) {
         withContent.add(f);
       } else if (!_kHideEmptyTabs || _fuenteDone[f] != true) {
-        // sigue cargando → mostrar con spinner
         empty.add(f);
       }
     }
@@ -575,7 +561,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     final same = next.length == _tabs.length &&
         List.generate(next.length, (i) => next[i] == _tabs[i]).every((e) => e);
 
-    // Los custom pueden cambiar de label/color aunque la key sea igual
     if (same) {
       _tabs = next;
       return;
@@ -630,10 +615,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     final idioma = MainFuentes.normalizeIdioma(map['idioma']?.toString());
     _porIdioma.putIfAbsent(idioma, () => []).add(map);
   }
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // Arranque
-  // ═════════════════════════════════════════════════════════════════════════
 
   Future<void> _bootstrap() async {
     try {
@@ -710,7 +691,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     }
 
     if (!forceRefresh) {
-      // Reutilizar último enlace solo si es siguiente capítulo
       if (cfg.reutilizarUltimoEnlace && widget.esSiguienteCapitulo) {
         final last = await _fuentes.tryReuseLastLink(
           tmdbId: _resolvedTmdbId,
@@ -725,12 +705,9 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
         }
       }
 
-      // CACHÉ 1 (2 días): servidores válidos
       final cached = await _loadValidServersCache();
       if (!mounted) return;
       if (cached != null && cached.servers.isNotEmpty) {
-        // CACHÉ 2 (1 hora): m3u8 vigentes. Los vencidos se descartan pero
-        // el servidor sigue listado como válido.
         final merged = await _mergeM3u8Cache(cached.servers);
         if (!mounted) return;
         setState(() {
@@ -740,8 +717,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
         _ingestCached(merged, markDone: cached.complete);
         _tryInheritFocusToList();
 
-        // Caché incompleto (el usuario salió antes de que terminara):
-        // completar en segundo plano sin perder lo que ya hay.
         if (!cached.complete) _runManual(preserve: true);
         return;
       }
@@ -749,10 +724,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
 
     _runManual();
   }
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // Caché
-  // ═════════════════════════════════════════════════════════════════════════
 
   Future<TvCachedServers?> _loadValidServersCache() async {
     final own = await TvServersCache.load(
@@ -763,7 +734,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     );
     if (own != null && own.servers.isNotEmpty) return own;
 
-    // Respaldo: caché compartida (móvil / precarga). Solo los verificados.
     try {
       final list = await FuentesCache.loadServers(
         tmdbId: _resolvedTmdbId,
@@ -780,9 +750,8 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
           ) ??
           0;
       final now = DateTime.now().millisecondsSinceEpoch;
-      final valid = <Map<String, dynamic>>[];
+      final all = <Map<String, dynamic>>[];
       for (final s in list) {
-        if (s['verificado'] != true) continue;
         final m = Map<String, dynamic>.from(s);
         final hasM3u8 = (m['resolved_m3u8']?.toString() ?? '').isNotEmpty;
         if (hasM3u8 && ageMs <= TvM3u8Cache.ttlMs) {
@@ -791,17 +760,15 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
           m.remove('resolved_m3u8');
           m.remove('m3u8_ts');
         }
-        valid.add(m);
+        all.add(m);
       }
-      if (valid.isEmpty) return null;
-      return TvCachedServers(valid, ageMs, true);
+      if (all.isEmpty) return null;
+      return TvCachedServers(all, ageMs, true);
     } catch (_) {
       return null;
     }
   }
 
-  /// Une los m3u8 vigentes (1 hora). Si venció → se quita el m3u8 pero el
-  /// servidor se mantiene como válido (se abrirá por Extractor).
   Future<List<Map<String, dynamic>>> _mergeM3u8Cache(
     List<Map<String, dynamic>> list,
   ) async {
@@ -832,7 +799,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
           m.remove('m3u8_ts');
         }
       }
-      m['verificado'] = true; // sigue siendo un servidor válido
       return m;
     }).toList();
   }
@@ -849,7 +815,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     if (!force && !_dirty) return;
     _dirty = false;
 
-    // Copia síncrona (por si el State se destruye durante el await)
     final snapshot =
         _todos.map((e) => Map<String, dynamic>.from(e)).toList();
     await TvServersCache.save(
@@ -875,10 +840,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     return l.contains('.m3u8') || l.contains('.mp4');
   }
 
-  // ═════════════════════════════════════════════════════════════════════════
-  // Ingesta
-  // ═════════════════════════════════════════════════════════════════════════
-
   void _ingestCached(
     List<Map<String, dynamic>> list, {
     required bool markDone,
@@ -902,7 +863,8 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     _ensureCardNodes(_currentList.length);
   }
 
-  /// Scrape + verificación. SOLO entran servidores validados.
+  /// Verifica SIEMPRE (HLS → PLAYER).
+  /// Sin HLS → se lista igual como WEBVIEW.
   void _runManual({bool preserve = false}) {
     final tmdb = _resolvedTmdbId;
     if (tmdb <= 0) {
@@ -934,91 +896,164 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
       _syncTabs();
     });
 
-    _sub?.cancel();
-    _sub = _fuentes
-        .fetchProgressive(
-          tmdbId: tmdb,
-          isMovie: _isMovie,
-          season: _isMovie ? 1 : _season,
-          episode: _isMovie ? 1 : _episode,
-          context: context,
-          forzarVerificar: true, // TV: SIEMPRE validar
-        )
-        .listen(
-          (event) {
-            if (!mounted) return;
+    for (final s in _subs) {
+      s.cancel();
+    }
+    _subs.clear();
 
-            if (event.isDone) {
-              setState(() {
-                _fuenteDone[event.fuente] = true;
-                if (event.error != null) {
-                  _fuenteError[event.fuente] = event.error;
-                }
-                _syncTabs();
-              });
-              final activas = _cfg!.fuentesActivas;
-              if (activas.every((f) => _fuenteDone[f] == true)) {
-                _onScrapeFinished();
+    var finishedStreams = 0;
+    void markStreamFinished() {
+      finishedStreams++;
+      if (finishedStreams >= 2) {
+        _onScrapeFinished();
+      }
+    }
+
+    void onFuenteDone(FuenteEvent event) {
+      setState(() {
+        _fuenteDone[event.fuente] = true;
+        if (event.error != null) {
+          _fuenteError[event.fuente] = event.error;
+        }
+        _syncTabs();
+      });
+    }
+
+    void ingestServer(Map<String, dynamic> raw, {FuenteId? eventFuente}) {
+      final map = Map<String, dynamic>.from(raw);
+      final url = map['servidor_url']?.toString() ?? '';
+      if (url.isEmpty) return;
+
+      final m3u8 = (map['resolved_m3u8']?.toString() ?? '').trim();
+
+      // Ya listado: upgrade WEBVIEW → PLAYER si llega m3u8
+      if (_seenUrls.contains(url)) {
+        if (m3u8.isEmpty) return;
+        final now = DateTime.now().millisecondsSinceEpoch;
+        setState(() {
+          void upgrade(List<Map<String, dynamic>> list) {
+            for (final s in list) {
+              if (s['servidor_url']?.toString() == url) {
+                s['resolved_m3u8'] = m3u8;
+                s['m3u8_ts'] = now;
+                s['verificado'] = true;
               }
-              return;
             }
+          }
 
-            final raw = event.servidor;
-            if (raw == null) return;
+          upgrade(_todos);
+          for (final l in _porFuente.values) {
+            upgrade(l);
+          }
+          for (final l in _porCustom.values) {
+            upgrade(l);
+          }
+          _syncTabs();
+        });
+        unawaited(TvM3u8Cache.save(
+          tmdbId: _resolvedTmdbId,
+          tipo: _mediaType,
+          season: _cSeason,
+          episode: _cEpisode,
+          embedUrl: url,
+          m3u8: m3u8,
+        ));
+        _schedulePersist();
+        return;
+      }
 
-            // ── SOLO VÁLIDOS: verificado + m3u8 resuelto ─────────────────
-            final m3u8 = (event.resolvedM3u8 ??
-                    raw['resolved_m3u8']?.toString() ??
-                    '')
-                .trim();
-            if (!event.isVerified || m3u8.isEmpty) return;
+      _seenUrls.add(url);
 
-            final map = Map<String, dynamic>.from(raw);
-            final url = map['servidor_url']?.toString() ?? '';
-            if (url.isEmpty || _seenUrls.contains(url)) return;
-            _seenUrls.add(url);
+      if (m3u8.isNotEmpty) {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        map['resolved_m3u8'] = m3u8;
+        map['m3u8_ts'] = now;
+        map['verificado'] = true;
+        unawaited(TvM3u8Cache.save(
+          tmdbId: _resolvedTmdbId,
+          tipo: _mediaType,
+          season: _cSeason,
+          episode: _cEpisode,
+          embedUrl: url,
+          m3u8: m3u8,
+        ));
+      } else {
+        map.remove('resolved_m3u8');
+        map.remove('m3u8_ts');
+      }
 
-            final now = DateTime.now().millisecondsSinceEpoch;
-            map['resolved_m3u8'] = m3u8;
-            map['m3u8_ts'] = now;
-            map['verificado'] = true;
+      final wasEmpty = _todos.isEmpty;
+      setState(() {
+        _addServerToBuckets(map, eventFuente: eventFuente);
+        _syncTabs();
+      });
+      _ensureCardNodes(_currentList.length);
+      _schedulePersist();
+      if (wasEmpty) _tryInheritFocusToList();
+    }
 
-            // CACHÉ 2 (1 hora)
-            unawaited(TvM3u8Cache.save(
-              tmdbId: _resolvedTmdbId,
-              tipo: _mediaType,
-              season: _cSeason,
-              episode: _cEpisode,
-              embedUrl: url,
-              m3u8: m3u8,
-            ));
+    void onEvent(FuenteEvent event) {
+      if (!mounted) return;
+      if (event.isDone) {
+        onFuenteDone(event);
+        return;
+      }
+      final raw = event.servidor;
+      if (raw == null) return;
 
-            final wasEmpty = _todos.isEmpty;
-            setState(() {
-              _addServerToBuckets(map, eventFuente: event.fuente);
-              _syncTabs();
-            });
-            _ensureCardNodes(_currentList.length);
+      final map = Map<String, dynamic>.from(raw);
+      final m3u8 =
+          (event.resolvedM3u8 ?? raw['resolved_m3u8']?.toString() ?? '')
+              .trim();
+      if (m3u8.isNotEmpty) {
+        map['resolved_m3u8'] = m3u8;
+      }
+      ingestServer(map, eventFuente: event.fuente);
+    }
 
-            // CACHÉ 1 (2 días) → guardado incremental
-            _schedulePersist();
+    // Stream 1: listado completo (sin exigir HLS)
+    _subs.add(
+      _fuentes
+          .fetchProgressive(
+            tmdbId: tmdb,
+            isMovie: _isMovie,
+            season: _isMovie ? 1 : _season,
+            episode: _isMovie ? 1 : _episode,
+            context: context,
+            forzarVerificar: false,
+          )
+          .listen(
+            onEvent,
+            onError: (_) {
+              if (mounted) markStreamFinished();
+            },
+            onDone: () {
+              if (mounted) markStreamFinished();
+            },
+          ),
+    );
 
-            if (wasEmpty) _tryInheritFocusToList();
-          },
-          onError: (e) {
-            if (!mounted) return;
-            _finishHandled = true;
-            setState(() {
-              _scraping = false;
-              _error = e.toString().replaceFirst(
-                    RegExp(r'^Exception:\s*'),
-                    '',
-                  );
-            });
-            _persistNow();
-          },
-          onDone: _onScrapeFinished,
-        );
+    // Stream 2: verificación SIEMPRE → HLS → PLAYER
+    _subs.add(
+      _fuentes
+          .fetchProgressive(
+            tmdbId: tmdb,
+            isMovie: _isMovie,
+            season: _isMovie ? 1 : _season,
+            episode: _isMovie ? 1 : _episode,
+            context: context,
+            forzarVerificar: true,
+          )
+          .listen(
+            onEvent,
+            onError: (_) {
+              if (mounted) markStreamFinished();
+            },
+            onDone: () {
+              if (mounted) markStreamFinished();
+            },
+          ),
+    );
   }
 
   void _onScrapeFinished() {
@@ -1028,7 +1063,7 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
       _scraping = false;
       _scrapeComplete = true;
       if (_todos.isEmpty && _error == null) {
-        _error = 'No se encontraron servidores válidos';
+        _error = 'No se encontraron servidores';
       }
       _syncTabs();
     });
@@ -1045,18 +1080,10 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     );
   }
 
-  // ═════════════════════════════════════════════════════════════════════════
-  // Abrir servidor
-  //   · m3u8 vigente (caché 1 h) o URL directa → PLAYER
-  //   · m3u8 vencido / inexistente             → EXTRACTOR (WEBVIEW)
-  //     (el servidor sigue siendo válido, solo hay que extraer otro m3u8)
-  // ═════════════════════════════════════════════════════════════════════════
-
   Future<void> _openServer(Map<String, dynamic> servidor) async {
     if (_navigating || !mounted) return;
     _navigating = true;
 
-    // Asegurar que lo encontrado hasta ahora quede en caché
     if (_dirty && _todos.isNotEmpty) unawaited(_persistNow());
 
     final embedUrl = servidor['servidor_url']?.toString() ?? '';
@@ -1066,7 +1093,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
         ? _titulo
         : (widget.titulo?.isNotEmpty == true ? widget.titulo! : 'Contenido');
 
-    // m3u8 SOLO si sigue vigente (< 1 hora)
     var m3u8 = '';
     if (embedUrl.isNotEmpty) {
       final cache = await TvM3u8Cache.load(
@@ -1126,37 +1152,35 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
       return;
     }
 
-    // m3u8 vencido → Extractor (WEBVIEW) con el mismo servidor válido
-    final extractorRoute = MaterialPageRoute(
-      builder: (_) => ExtractorPage(
+    final webviewRoute = MaterialPageRoute(
+      builder: (_) => TvPlayerWebViewPage(
+        url: embedUrl,
+        title: tituloFinal,
+        servidorNombre: nombre,
+        idioma: idioma,
         idcontenido: widget.idcontenido,
         tmdbId: _resolvedTmdbId,
         temporada: _isMovie ? null : widget.temporada,
         capitulo: _isMovie ? null : widget.capitulo,
-        servidorUrl: embedUrl,
-        servidorNombre: nombre,
         tipo: _mediaType,
-        titulo: tituloFinal,
-        idioma: idioma,
       ),
     );
 
     final navigator = Navigator.of(context);
     if (widget.fromPlayer) {
       navigator.pop();
-      navigator.pushReplacement(extractorRoute);
+      navigator.pushReplacement(webviewRoute);
     } else {
-      navigator.pushReplacement(extractorRoute);
+      navigator.pushReplacement(webviewRoute);
     }
     _schedulePreload();
   }
 
-  // ═════════════════════════════════════════════════════════════════════════
-  // Recargar (limpia AMBOS cachés y revalida todo)
-  // ═════════════════════════════════════════════════════════════════════════
-
   Future<void> _onReload() async {
-    _sub?.cancel();
+    for (final s in _subs) {
+      s.cancel();
+    }
+    _subs.clear();
     _persistTimer?.cancel();
     _dirty = false;
 
@@ -1204,10 +1228,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     });
     await _startFlow(forceRefresh: true);
   }
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // Utilidades
-  // ═════════════════════════════════════════════════════════════════════════
 
   String? _formatCacheAge(int? ageMs) {
     if (ageMs == null) return null;
@@ -1267,10 +1287,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     return _fuenteDone[t.fuente] == true;
   }
 
-  // ═════════════════════════════════════════════════════════════════════════
-  // Foco / D-pad
-  // ═════════════════════════════════════════════════════════════════════════
-
   void _go(FocusNode node) {
     if (!node.canRequestFocus) return;
     node.requestFocus();
@@ -1284,7 +1300,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     if (_listScroll.hasClients) _listScroll.jumpTo(0);
   }
 
-  /// Enfoca una tarjeta (asegurando que esté construida antes de pedir foco)
   void _focusCard(int idx) {
     final n = _currentList.length;
     if (n == 0) return;
@@ -1442,7 +1457,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     return KeyEventResult.ignored;
   }
 
-  /// Solo desplaza si la tarjeta queda fuera del viewport.
   void _ensureCardVisible(int index) {
     if (!_listScroll.hasClients) return;
     final pos = _listScroll.position;
@@ -1460,10 +1474,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
       _listScroll.jumpTo(target.clamp(0.0, pos.maxScrollExtent));
     }
   }
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // UI
-  // ═════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -1501,7 +1511,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Info IZQUIERDA
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(40, 32, 24, 32),
@@ -1554,7 +1563,7 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
                                 if (_fromCache && _cacheAgeLabel != null)
                                   _metaChip('Caché · $_cacheAgeLabel'),
                                 _metaChip(
-                                  '${_todos.length} válido${_todos.length == 1 ? '' : 's'}',
+                                  '${_todos.length} servidor${_todos.length == 1 ? '' : 'es'}',
                                 ),
                               ],
                             ),
@@ -1564,7 +1573,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
                     ),
                   ),
                 ),
-                // Panel derecha
                 Padding(
                   padding: const EdgeInsets.fromLTRB(0, 12, 16, 12),
                   child: ClipRRect(
@@ -1722,10 +1730,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     );
   }
 
-  // ── Pestañas ────────────────────────────────────────────────────────────
-  // SingleChildScrollView + Row: TODAS las pestañas quedan construidas, así
-  // el D-pad siempre puede moverse a la siguiente aunque esté fuera de vista.
-
   Widget _buildTabsRow() {
     if (_tabs.isEmpty) return const SizedBox.shrink();
     _ensureTabNodes();
@@ -1844,8 +1848,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     );
   }
 
-  // ── Banderas / badges ───────────────────────────────────────────────────
-
   String? _flagUrl(String code) {
     final c = code.toLowerCase().trim();
     if (c == 'es_es' || c.contains('castellano')) {
@@ -1915,8 +1917,6 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     );
   }
 
-  // ── Cuerpo ──────────────────────────────────────────────────────────────
-
   Widget _buildBody() {
     if (_loadingConfig || (_scraping && _todos.isEmpty)) {
       return const Center(
@@ -1955,7 +1955,7 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     if (list.isEmpty) {
       return Center(
         child: Text(
-          _scraping ? 'Verificando…' : 'Sin servidores válidos en esta fuente',
+          _scraping ? 'Verificando…' : 'Sin servidores en esta fuente',
           style: TextStyle(
             color: Colors.white.withValues(alpha: 0.45),
             fontSize: 15,
@@ -1980,9 +1980,7 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
         final idioma = MainFuentes.normalizeIdioma(s['idioma']?.toString());
         final url = s['servidor_url']?.toString() ?? '';
 
-        // PLAYER = m3u8 vigente (< 1 h) o URL directa.
-        // WEBVIEW = servidor válido cuyo m3u8 venció → se re-extrae.
-        final esPlayer = _hasFreshM3u8(s) || _isDirectUrl(url);
+        final esPlayer = _isPlayerServer(s);
         final isCurrent = widget.currentServidorUrl != null &&
             widget.currentServidorUrl == url;
 
