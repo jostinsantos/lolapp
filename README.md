@@ -1,194 +1,389 @@
-<p align="center">
-  <img src="assets/logo.png" alt="LolPlusTV Logo" width="160"/>
-</p>
+<div align="center">
 
-<h1 align="center">LolPlusTV</h1>
+<img src="assets/logo.png" alt="LolPlusTV Logo" width="180"/>
 
-<p align="center">
-  <b>Películas y series en un solo lugar</b><br/>
-  App multiplataforma (Mobile + Android TV) con catálogo TMDB, múltiples fuentes y reproductor integrado.
-</p>
+# LolPlusTV
 
-<p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-E50914?style=flat-square" alt="version"/>
-  <img src="https://img.shields.io/badge/Flutter-3.x-02569B?style=flat-square&logo=flutter" alt="flutter"/>
-  <img src="https://img.shields.io/badge/Android-Mobile%20%7C%20TV-3DDC84?style=flat-square&logo=android" alt="android"/>
-  <img src="https://img.shields.io/badge/license-Personal%20Use-lightgrey?style=flat-square" alt="license"/>
-</p>
+### Películas y series en un solo lugar
 
----
+Aplicación multiplataforma desarrollada con **Flutter** para dispositivos móviles y **Android TV**, con catálogo basado en TMDB, múltiples fuentes, addons y reproductor integrado.
 
-## Descripción
+<br/>
 
-**LolPlusTV** es una aplicación Flutter orientada a descubrir y reproducir películas y series. Combina:
+![Version](https://img.shields.io/badge/version-1.0.0-E50914?style=for-the-badge)
+![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=for-the-badge\&logo=flutter)
+![Android](https://img.shields.io/badge/Android-Mobile%20%7C%20TV-3DDC84?style=for-the-badge\&logo=android)
+![License](https://img.shields.io/badge/license-Personal%20Use-lightgrey?style=for-the-badge)
 
-- Catálogo y metadatos de **TMDB** (pósteres, sinopsis, elenco, temporadas, recomendaciones).
-- Varias **fuentes / scrapers** para listados y búsqueda.
-- Múltiples **servidores de video** (extractores) con selección de calidad e idioma.
-- Experiencia **móvil** y **Android TV** (navegación con mando / foco).
-- Favoritos, historial, ver después, descargas y ajustes de reproducción.
-
-> La app actúa como un **cliente / agregador de interfaces**. El contenido multimedia no se aloja ni se distribuye desde nuestros servidores.
+</div>
 
 ---
 
-## Capturas / Logo
+## 📑 Contenido
 
-Coloca tu logo en:
+* [Descripción](#-descripción)
+* [Características](#-características)
+* [Plataformas](#-plataformas)
+* [Arquitectura](#-arquitectura)
+* [Catálogos](#-catálogos)
+* [Servidores](#-servidores)
+* [Sistema de Addons](#-sistema-de-addons)
+* [Interfaz](#-interfaz)
+* [TMDB](#-tmdb)
+* [Privacidad](#-privacidad)
+* [Política de contenido](#-política-de-contenido)
+* [Instalación](#-instalación)
+* [Estructura del proyecto](#-estructura-del-proyecto)
+* [Licencia](#-licencia)
+* [Aviso legal](#-aviso-legal)
+
+---
+
+# 🎬 Descripción
+
+**LolPlusTV** es una aplicación Flutter orientada al descubrimiento y reproducción de películas y series.
+
+La aplicación combina diferentes servicios para proporcionar una experiencia centralizada:
 
 ```text
-assets/logo.png
+┌─────────────────────────────────────────────┐
+│                  LolPlusTV                  │
+├─────────────────────────────────────────────┤
+│                                             │
+│  TMDB                                       │
+│  └── Metadatos                              │
+│      ├── Películas                          │
+│      ├── Series                             │
+│      ├── Actores                            │
+│      ├── Temporadas                         │
+│      └── Recomendaciones                    │
+│                                             │
+│  Fuentes                                    │
+│  └── Catálogos                              │
+│      ├── Búsqueda                           │
+│      ├── Listados                           │
+│      └── Detalles                           │
+│                                             │
+│  Servidores                                 │
+│  └── Enlaces de reproducción                │
+│      ├── Idiomas                            │
+│      ├── Calidad                            │
+│      └── Subtítulos                         │
+│                                             │
+│  Player                                     │
+│  └── Reproducción                           │
+│                                             │
+└─────────────────────────────────────────────┘
 ```
 
-Y (opcional) capturas en:
+La aplicación funciona como **cliente/agregador de interfaces y servicios externos**.
+
+> El contenido multimedia no se aloja ni se distribuye directamente desde los servidores de LolPlusTV.
+
+---
+
+# ✨ Características
+
+| Característica             | Descripción                                               |
+| -------------------------- | --------------------------------------------------------- |
+| 🏠 **Inicio**              | Películas y series organizadas en diferentes secciones    |
+| 🔎 **Búsqueda**            | Búsqueda mediante TMDB y fuentes externas                 |
+| 🧭 **Descubrir**           | Exploración de catálogos disponibles                      |
+| 🎬 **Detalles**            | Información, reparto, temporadas y episodios              |
+| 🌐 **Servidores**          | Diferentes servidores de reproducción                     |
+| ▶️ **Reproductor**         | Reproducción integrada                                    |
+| 💬 **Subtítulos**          | Soporte para subtítulos cuando están disponibles          |
+| ❤️ **Favoritos**           | Guardado local de contenido                               |
+| 🕐 **Historial**           | Registro y progreso de reproducción                       |
+| 📺 **Android TV**          | Interfaz optimizada para mando y navegación por foco      |
+| 📱 **Mobile**              | Interfaz adaptada a teléfonos                             |
+| ⬇️ **Descargas**           | Gestión de contenido descargado/local                     |
+| ⚙️ **Ajustes**             | Configuración general de la aplicación                    |
+| 🧩 **Addons**              | Sistema extensible de fuentes y catálogos                 |
+| 🎨 **Temas**               | Posibilidad de seleccionar diferentes estilos de interfaz |
+| 🔌 **APIs personalizadas** | Integración de APIs externas configuradas por el usuario  |
+
+---
+
+# 📱 Plataformas
+
+Actualmente el proyecto está diseñado para:
+
+### Android Mobile
+
+Interfaz adaptada a:
+
+* teléfonos
+* diferentes tamaños de pantalla
+* navegación táctil
+* orientación vertical/horizontal
+
+### Android TV
+
+Interfaz adaptada a:
+
+* televisores
+* Android TV
+* Google TV
+* control remoto
+* navegación mediante foco
+* navegación mediante D-Pad
+
+La aplicación mantiene una arquitectura compartida, pero utiliza diferentes **Shells de presentación**:
 
 ```text
-docs/screenshots/
+                    LolPlusTV
+                       │
+             ┌─────────┴─────────┐
+             │                   │
+          Mobile                TV
+             │                   │
+      Mobile Shell          TV Shell
+             │                   │
+             └─────────┬─────────┘
+                       │
+                    Features
+                       │
+              ┌────────┴────────┐
+              │                 │
+           Domain             Data
 ```
 
-Ejemplo en el README:
-
-```markdown
-![Logo](assets/logo.png)
-```
-
 ---
 
-## Funciones principales
+# 🧩 Sistema de Addons
 
-| Función | Descripción |
-|--------|-------------|
-| **Inicio (Home)** | Secciones de películas y series con TMDB |
-| **Búsqueda** | Búsqueda por título (TMDB + fuentes) |
-| **Descubrir** | Exploración por fuentes / catálogos externos |
-| **Detalle de contenido** | Info, elenco, temporadas y episodios |
-| **Servidores** | Lista de enlaces por idioma / calidad |
-| **Reproductor** | Playback, subtítulos, calidad, siguiente episodio |
-| **Favoritos** | Guardar títulos |
-| **Historial** | Continuar viendo / progreso |
-| **Descargas** | Gestión de descargas y reproductor local |
-| **Ajustes** | Apariencia, caché, fuentes, player, actualizaciones |
-| **Modo Mobile / TV** | Interfaz adaptada a teléfono y Android TV |
-| **APIs personalizadas** | Soporte de APIs propias del usuario |
+LolPlusTV está diseñado para trabajar con un sistema extensible de **addons**.
 
----
+Existen dos tipos principales:
 
-## Catálogos actuales (listado / home de fuentes)
+### 1. Fuentes
 
-Fuentes usadas para **listados y búsqueda** de contenido:
+Las fuentes proporcionan acceso a:
 
-| ID | Nombre | Listado | Búsqueda |
-|----|--------|---------|----------|
-| `serieskao` | SeriesKao | Sí | Sí |
-| `tioplus` | TioPlus | Sí | Sí |
-| `cuevana` | Cuevana | Sí | Sí |
-| `pelisplus` | PelisPlus | Sí | Sí |
-| `cinehax` | CineHax | Sí | — |
+* catálogos
+* búsquedas
+* detalles
+* episodios
+* servidores
+* información adicional
 
-Metadatos y catálogo principal de películas/series: **[TMDB](https://www.themoviedb.org/)**.
+### 2. Catálogos
 
----
+Los catálogos permiten añadir nuevas listas o secciones de contenido.
 
-## Fuentes / servidores de reproducción actuales
-
-Extractores registrados para obtener enlaces de reproducción:
-
-| ID | Nombre | Badge |
-|----|--------|-------|
-| `embed69` | Embed69 | EMBED69 |
-| `poseidon` | Poseidon | POSEIDON |
-| `cuevana` | Cuevana | CUEVANA |
-| `unlimplay` | Unlimplay | UNLIM |
-| `cinesrc` | CineSRC | CINESRC |
-| `cinecalidad` | Cinecalidad | CINE |
-| `tioplus` | TioPlus | TIOPLUS |
-| `fuegocine` | FuegoCine | FUEGO |
-| `hackstore` | HackStore | HACK |
-| `pelisplus` | PelisPlusHD | PELIS+ |
-| `pelispedia` | Pelispedia | PEDIA |
-| `seriesmetro` | SeriesMetro | METRO |
-| `smartpelis` | SmartPelis | SMART |
-| `customapi` | Mis APIs | API |
-
-Las fuentes se pueden activar/desactivar desde **Ajustes → Fuentes**.
-
----
-
-## Content and Source Policy
-
-**LolPlusTV no aloja, sube ni distribuye archivos de video.**
-
-- La aplicación solo muestra **metadatos** (títulos, imágenes, descripciones) y **enlaces** obtenidos de fuentes de terceros configuradas por el usuario o por el cliente.
-- Los servidores y sitios de origen son **externos e independientes**. No controlamos su disponibilidad, legalidad ni contenido.
-- El usuario es responsable de cumplir las leyes de su país respecto al acceso y uso de contenido en línea.
-- Si eres titular de derechos y consideras que algún enlace o uso infringe tu propiedad intelectual, contacta al administrador del sitio de origen o abre un issue en este repositorio para revisar la integración de esa fuente.
-
-**Uso permitido de esta app (software):**
-
-- Uso personal / educativo.
-- No se autoriza redistribuir builds modificados con marcas de terceros sin permiso.
-- No se garantiza servicio continuo de ninguna fuente externa.
-
----
-
-## Metadata Credits
-
-Los datos de películas y series (títulos, sinopsis, pósteres, backdrops, elenco, etc.) se obtienen de:
-
-<p align="center">
-  <a href="https://www.themoviedb.org/">
-    <img src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88fe984d149ef0a8118227d1e93b0dc07f6b8b839.svg" alt="TMDB" width="200"/>
-  </a>
-</p>
-
-> This product uses the TMDB API but is not endorsed or certified by TMDB.
-
-- **API:** [The Movie Database (TMDB)](https://www.themoviedb.org/)
-- **Imágenes:** rutas de póster/backdrop servidas por TMDB (`image.tmdb.org`)
-- Las fuentes de listado/reproducción adicionales son sitios de terceros y mantienen sus propias marcas y políticas.
-
----
-
-## Privacidad
-
-- **No se requiere cuenta** de usuario en nuestros servidores para usar la app.
-- Preferencias (modo mobile/tv, fuentes activas, favoritos, historial, etc.) se guardan **en el dispositivo** (SharedPreferences / almacenamiento local).
-- La app realiza peticiones de red a:
-  - API de TMDB (metadatos)
-  - Fuentes/scrapers y servidores de video configurados
-  - API propia de versiones/actualización (si está habilitada)
-- **No vendemos datos personales.**
-- No recopilamos de forma intencionada información sensible del usuario más allá de lo necesario para el funcionamiento local de la app.
-- Recomendación: usa la app en redes de confianza y mantén actualizado el sistema.
-
-Si en el futuro se añaden analíticas o servicios en la nube, se documentarán aquí.
-
----
-
-## Licencia
+La relación conceptual es:
 
 ```text
-Uso personal. Todos los derechos del código de la aplicación reservados por el autor,
-salvo las librerías de terceros (Flutter, plugins) que conservan sus propias licencias.
-
-El contenido multimedia y las marcas de TMDB, fuentes y servidores pertenecen a sus
-respectivos titulares. Esta aplicación no reclama propiedad sobre ese contenido.
+                    ADDONS
+                       │
+             ┌─────────┴─────────┐
+             │                   │
+          FUENTES             CATÁLOGOS
+             │                   │
+             │                   │
+             └───────┬───────────┘
+                     │
+              Contenido
+                     │
+             Películas / Series
 ```
 
-Puedes cambiar este bloque por una licencia concreta (MIT, GPL, etc.) si publicas el código como open source.
+Cuando el usuario quiere agregar un catálogo, primero debe:
+
+```text
+Seleccionar una fuente existente
+              │
+              ▼
+       Seleccionar catálogo
+```
+
+o:
+
+```text
+Crear / agregar una nueva fuente
+              │
+              ▼
+       Seleccionar catálogo
+```
+
+Esto permite que el sistema mantenga una relación clara entre **fuente → catálogo → contenido**.
 
 ---
 
+# 🎨 Interfaz y temas
+
+LolPlusTV está preparado para permitir que el usuario seleccione el estilo visual de la aplicación.
+
+Conceptualmente:
+
+```text
+Ajustes
+   │
+   └── Apariencia
+          │
+          ├── Tema
+          │
+          ├── Estilo de interfaz
+          │
+          ├── Colores
+          │
+          ├── Tamaño de tarjetas
+          │
+          └── Navegación
+```
+
+Los estilos pueden modificar elementos como:
+
+* tarjetas
+* navegación
+* colores
+* bordes
+* radios
+* tamaños
+* distribución
+* densidad de información
+* comportamiento de la interfaz
+
+El objetivo es separar:
+
+```text
+Lógica de negocio
+        ≠
+Diseño visual
+```
+
+de forma que sea posible cambiar la apariencia sin reescribir las funcionalidades principales.
 
 ---
 
-## Mapa estructural de la aplicación
+# 🌐 Catálogos actuales
+
+Fuentes utilizadas para listados y búsquedas:
+
+| ID          | Nombre    | Listado | Búsqueda |
+| ----------- | --------- | :-----: | :------: |
+| `serieskao` | SeriesKao |    ✅    |     ✅    |
+| `tioplus`   | TioPlus   |    ✅    |     ✅    |
+| `cuevana`   | Cuevana   |    ✅    |     ✅    |
+| `pelisplus` | PelisPlus |    ✅    |     ✅    |
+| `cinehax`   | CineHax   |    ✅    |     —    |
+
+### Metadata principal
+
+Los metadatos principales de películas y series se obtienen mediante **TMDB**.
+
+Esto permite mantener separada la información descriptiva del contenido respecto de las fuentes externas.
+
+---
+
+# ▶️ Servidores de reproducción
+
+Extractores/proveedores actualmente registrados:
+
+| ID            | Nombre      | Identificador |
+| ------------- | ----------- | ------------- |
+| `embed69`     | Embed69     | `EMBED69`     |
+| `poseidon`    | Poseidon    | `POSEIDON`    |
+| `cuevana`     | Cuevana     | `CUEVANA`     |
+| `unlimplay`   | Unlimplay   | `UNLIM`       |
+| `cinesrc`     | CineSRC     | `CINESRC`     |
+| `cinecalidad` | Cinecalidad | `CINE`        |
+| `tioplus`     | TioPlus     | `TIOPLUS`     |
+| `fuegocine`   | FuegoCine   | `FUEGO`       |
+| `hackstore`   | HackStore   | `HACK`        |
+| `pelisplus`   | PelisPlusHD | `PELIS+`      |
+| `pelispedia`  | Pelispedia  | `PEDIA`       |
+| `seriesmetro` | SeriesMetro | `METRO`       |
+| `smartpelis`  | SmartPelis  | `SMART`       |
+| `customapi`   | Mis APIs    | `API`         |
+
+Los proveedores pueden activarse o desactivarse desde:
+
+```text
+Ajustes
+   └── Fuentes
+        └── Servidores
+```
+
+---
+
+# 🏗️ Arquitectura
+
+La aplicación utiliza una arquitectura dividida en capas.
+
+```text
+┌──────────────────────────────────────┐
+│             PRESENTATION             │
+│        Mobile / TV / Shared         │
+└──────────────────┬───────────────────┘
+                   │
+                   ▼
+┌──────────────────────────────────────┐
+│              FEATURES               │
+│ Home · Search · Content · Player    │
+│ Settings · Addons · Favorites       │
+└──────────────────┬───────────────────┘
+                   │
+                   ▼
+┌──────────────────────────────────────┐
+│               DOMAIN                │
+│ Models · Repositories · Services    │
+└──────────────────┬───────────────────┘
+                   │
+                   ▼
+┌──────────────────────────────────────┐
+│                DATA                  │
+│ TMDB · Sources · Scrapers · APIs    │
+│ Extractors · Aggregators            │
+└──────────────────┬───────────────────┘
+                   │
+                   ▼
+┌──────────────────────────────────────┐
+│                CORE                  │
+│ Network · Storage · Errors · Utils  │
+└──────────────────────────────────────┘
+```
+
+### Flujo principal
+
+```text
+Usuario
+   │
+   ▼
+Presentation
+   │
+   ▼
+Feature
+   │
+   ▼
+Domain
+   │
+   ▼
+Repository
+   │
+   ▼
+Data
+   │
+   ├── TMDB
+   ├── Sources
+   ├── Scrapers
+   ├── APIs
+   └── Extractors
+```
+
+---
+
+# 📁 Estructura del proyecto
+
+La estructura principal de `lib/` está organizada de la siguiente manera:
 
 ```text
 lib/
-├── main.dart                          # Entrada, splash, modo Mobile/TV, disclaimer
 │
-├── app/                               # Configuración global
+├── main.dart
+│
+├── app/
 │   ├── app.dart
 │   ├── app_config.dart
 │   ├── app_theme.dart
@@ -196,108 +391,326 @@ lib/
 │   ├── app_router.dart
 │   └── app_lifecycle.dart
 │
-├── core/                              # Infraestructura compartida
-│   ├── errors/                        # Excepciones de app, red, scraper, player...
-│   ├── network/                       # HTTP, headers, caché de requests
-│   ├── storage/                       # SharedPreferences, caché, storage
-│   ├── utils/                         # Logger, URLs, HTML, fechas, platform
-│   ├── constants/                     # versiones, sources, keys, player
-│   └── result/                        # Success / Failure
+├── core/
+│   ├── errors/
+│   ├── network/
+│   ├── storage/
+│   ├── utils/
+│   ├── constants/
+│   └── result/
 │
-├── domain/                            # Capa de negocio (modelos y contratos)
+├── domain/
 │   ├── models/
-│   │   ├── content/                   # Movie, Series, Episode, Actor...
-│   │   ├── source/                    # Source, capabilities, status
-│   │   ├── server/                    # VideoServer, quality, subtitle
-│   │   ├── player/                    # Playback state, progress, settings
-│   │   ├── user/                      # Favorites, history, watch later
-│   │   └── addon/                     # Addons / manifests
-│   ├── repositories/                  # Interfaces (contratos)
-│   └── services/                      # Contratos de servicios de dominio
+│   │   ├── content/
+│   │   ├── source/
+│   │   ├── server/
+│   │   ├── player/
+│   │   ├── user/
+│   │   └── addon/
+│   │
+│   ├── repositories/
+│   └── services/
 │
-├── data/                              # Implementaciones y datos externos
+├── data/
 │   ├── datasources/
-│   │   ├── remote/tmdb/               # API TMDB (home, search, discover...)
-│   │   └── remote/sources/            # Custom API del usuario
+│   │   └── remote/
+│   │       ├── tmdb/
+│   │       └── sources/
+│   │
 │   ├── scrapers/
-│   │   ├── base/                      # Base scrapers + registry
-│   │   ├── home/                      # SeriesKao, Cuevana, TioPlus, PelisPlus...
-│   │   ├── detail/                    # Detalle por fuente
-│   │   └── servers/                   # Servidores por fuente
+│   │   ├── base/
+│   │   ├── home/
+│   │   ├── detail/
+│   │   └── servers/
+│   │
 │   ├── extractors/
-│   │   ├── hls/                       # HLS extractor / parser
-│   │   └── providers/                 # Embed69, Poseidon, Cuevana, Cinecalidad...
-│   ├── aggregators/                   # Agregación de fuentes y servidores
-│   └── repositories/                  # Implementaciones de repositorios
+│   │   ├── hls/
+│   │   └── providers/
+│   │
+│   ├── aggregators/
+│   └── repositories/
 │
-├── features/                          # UI por funcionalidad
-│   ├── home/                          # Inicio películas / series
-│   ├── search/                        # Búsqueda
-│   ├── discover/                      # Descubrir por fuentes
-│   ├── content/                       # Página de detalle, elenco, temporadas
-│   ├── servers/                       # Modal y precarga de servidores
-│   ├── player/                        # Reproductor, calidad, subtítulos, TV
-│   ├── downloads/                     # Descargas y player local
-│   ├── favorites/                     # Favoritos
-│   ├── history/                       # Historial
-│   ├── profile/                       # Perfil (TV)
-│   ├── settings/                      # Ajustes (apariencia, fuentes, player...)
-│   └── addons/                        # Addons / APIs personalizadas
+├── features/
+│   ├── home/
+│   ├── search/
+│   ├── discover/
+│   ├── content/
+│   ├── servers/
+│   ├── player/
+│   ├── downloads/
+│   ├── favorites/
+│   ├── history/
+│   ├── profile/
+│   ├── settings/
+│   └── addons/
 │
-├── presentation/                      # Shells y UI compartida
-│   ├── mobile/                        # mobile_shell (navegación móvil)
-│   ├── tv/                            # tv_shell (navegación TV + foco)
-│   └── shared/                        # Modales, widgets, loaders, errores
+├── presentation/
+│   ├── mobile/
+│   ├── tv/
+│   └── shared/
 │
-└── generated/                         # Código generado
+└── generated/
 ```
 
-### Flujo simplificado
+> La documentación detallada de cada carpeta y archivo puede mantenerse en `docs/ARCHITECTURE.md`.
+
+---
+
+# 🔄 Flujo de reproducción
+
+El flujo general de reproducción es:
 
 ```text
-Usuario
-  │
-  ├─► presentation/ (Mobile o TV shell)
-  │       │
-  │       └─► features/ (Home, Search, Content, Player...)
-  │               │
-  │               ├─► domain/ (modelos y contratos)
-  │               │
-  │               └─► data/
-  │                     ├─► TMDB (metadatos)
-  │                     ├─► scrapers (catálogos)
-  │                     └─► extractors (servidores de video)
-  │
-  └─► core/ (red, storage, utils, errores)
+Contenido
+   │
+   ▼
+TMDB
+   │
+   ▼
+Detalle
+   │
+   ▼
+Fuente
+   │
+   ▼
+Servidor / Extractor
+   │
+   ▼
+Enlace de reproducción
+   │
+   ▼
+Player
+   │
+   ├── Calidad
+   ├── Idioma
+   ├── Subtítulos
+   └── Progreso
 ```
 
+---
 
-## Requisitos
+# 🎞️ TMDB
 
-- Flutter 3.x
-- Android (teléfono / TV)
-- Conexión a Internet
+LolPlusTV utiliza **The Movie Database (TMDB)** para obtener información de películas y series.
+
+Se utiliza para datos como:
+
+* títulos
+* títulos originales
+* pósteres
+* backdrops
+* sinopsis
+* géneros
+* reparto
+* temporadas
+* episodios
+* recomendaciones
+* identificadores TMDB
+
+<p align="center">
+  <a href="https://www.themoviedb.org/">
+    <img src="assets/images/tmdb.png" alt="TMDB" width="180"/>
+  </a>
+</p>
+
+> This product uses the TMDB API but is not endorsed or certified by TMDB.
+
+**API:** https://www.themoviedb.org/
+
+Las imágenes son servidas mediante la infraestructura de imágenes de TMDB.
+
+---
+
+# 🔐 Privacidad
+
+LolPlusTV no requiere una cuenta propia para utilizar las funciones principales de la aplicación.
+
+Las preferencias pueden almacenarse localmente en el dispositivo.
+
+Entre los datos almacenados localmente pueden encontrarse:
+
+* fuentes activas
+* favoritos
+* historial
+* progreso
+* preferencias de reproducción
+* apariencia
+* configuración de la aplicación
+
+La aplicación puede realizar solicitudes hacia:
+
+```text
+TMDB
+  │
+  ├── Metadatos
+  └── Imágenes
+
+Fuentes externas
+  │
+  ├── Catálogos
+  ├── Búsquedas
+  └── Información
+
+Servicios de reproducción
+  │
+  └── Enlaces / servidores
+
+API de actualización
+  │
+  └── Versiones
+```
+
+No se venden datos personales.
+
+Si en el futuro se incorporan servicios de analítica, cuentas o infraestructura en la nube, deberán documentarse en esta sección.
+
+---
+
+# ⚖️ Política de contenido
+
+**LolPlusTV no aloja, sube ni distribuye directamente archivos multimedia.**
+
+La aplicación funciona como cliente para servicios externos y puede mostrar:
+
+* metadatos
+* imágenes
+* información de contenido
+* enlaces proporcionados por fuentes externas
+
+Las fuentes externas son independientes del proyecto.
+
+LolPlusTV no controla:
+
+* disponibilidad
+* contenido
+* políticas
+* funcionamiento
+* legalidad de servicios externos
+
+El usuario debe utilizar la aplicación de acuerdo con las leyes aplicables en su jurisdicción.
+
+Si eres titular de derechos y consideras que una integración infringe tus derechos, puedes contactar al administrador del servicio correspondiente o solicitar una revisión de la integración.
+
+---
+
+# 🚀 Instalación
+
+### Requisitos
+
+* Flutter 3.x
+* Dart compatible con la versión de Flutter
+* Android SDK
+* Android Mobile o Android TV
+* conexión a Internet
+
+### Clonar el proyecto
+
+```bash
+git clone <REPOSITORY_URL>
+cd lolplustv
+```
+
+### Instalar dependencias
 
 ```bash
 flutter pub get
+```
+
+### Ejecutar
+
+```bash
 flutter run
+```
+
+### Comprobar el entorno
+
+```bash
+flutter doctor
 ```
 
 ---
 
-## Aviso legal (disclaimer)
+# 🧪 Desarrollo
 
-Al usar LolPlusTV aceptas que:
+Para analizar el proyecto:
 
-1. Eres el único responsable del uso que hagas de la aplicación.
-2. Los desarrolladores no se hacen responsables del contenido ofrecido por terceros.
-3. La app puede dejar de funcionar si las fuentes externas cambian o se desactivan.
+```bash
+flutter analyze
+```
+
+Para ejecutar las pruebas:
+
+```bash
+flutter test
+```
+
+Para comprobar los dispositivos disponibles:
+
+```bash
+flutter devices
+```
 
 ---
 
-<p align="center">
-  Hecho con Flutter · Mobile & Android TV
-</p>
-#   l o l a p p  
- #   l o l a p p  
- 
+# 📦 Build
+
+### APK
+
+```bash
+flutter build apk --release
+```
+
+### App Bundle
+
+```bash
+flutter build appbundle --release
+```
+
+### Android TV
+
+El proyecto puede generar builds destinados a dispositivos Android TV utilizando la configuración correspondiente del proyecto Android.
+
+---
+
+---
+
+# 📄 Licencia
+
+Actualmente el proyecto utiliza una licencia de uso personal.
+
+```text
+Uso personal. Todos los derechos del código de la aplicación
+reservados por el autor, salvo las librerías de terceros que
+conservan sus propias licencias.
+
+El contenido multimedia, marcas, servicios y datos proporcionados
+por terceros pertenecen a sus respectivos titulares.
+
+La aplicación no reclama propiedad sobre dichos contenidos.
+```
+
+Si el proyecto se publica posteriormente como código abierto, esta sección puede sustituirse por una licencia específica como MIT, GPL u otra compatible con las dependencias utilizadas.
+
+---
+
+# ⚠️ Aviso legal
+
+Al utilizar LolPlusTV:
+
+1. El usuario es responsable del uso que haga de la aplicación.
+2. Los servicios externos son independientes del proyecto.
+3. Las fuentes externas pueden cambiar o dejar de funcionar.
+4. El proyecto no garantiza la disponibilidad de servicios externos.
+5. El usuario debe respetar las leyes aplicables en su jurisdicción.
+
+---
+
+<div align="center">
+
+### 🎬 LolPlusTV
+
+**Flutter · Mobile · Android TV**
+
+Hecho con Flutter ❤️
+
+</div>
