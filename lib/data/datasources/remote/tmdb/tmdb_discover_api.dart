@@ -2,12 +2,13 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/constants/tmdb_apis.dart';
 
 /// Descubrir por tipo + género + orden (TMDB /discover).
 ///
 /// sortBy: popularity | year | title | rating
 class TmdbDiscoverService {
-  static const String _apiKey = 'a2d9bbed370d9f678e34006f8750a5a5';
+  static const String _apiKeyFallback = 'a2d9bbed370d9f678e34006f8750a5a5'; // unused fallback
   static const String _base = 'https://api.themoviedb.org/3';
   static const String _imgBase = 'https://image.tmdb.org/t/p';
 
@@ -73,11 +74,8 @@ class TmdbDiscoverService {
     );
   }
 
-  String _apiLanguage(_DiscPrefs prefs) {
-    if (prefs.spanishLatino) return 'es-MX';
-    if (prefs.spanishCastellano) return 'es-ES';
-    if (prefs.english) return 'en-US';
-    return 'es-MX';
+  Future<String> _apiLanguage([dynamic _]) async {
+    return TmdbApis.getLanguage();
   }
 
   /// sort_by de TMDB según tipo y criterio.
@@ -101,7 +99,7 @@ class TmdbDiscoverService {
     required Map<String, String> query,
   }) async {
     final uri = Uri.parse('$_base$path').replace(queryParameters: {
-      'api_key': _apiKey,
+      'api_key': await TmdbApis.getApiKey(),
       ...query,
     });
     try {
@@ -166,7 +164,7 @@ class TmdbDiscoverService {
     final isTv = mediaType.toLowerCase() == 'tv';
     final tipo = isTv ? 'tv' : 'movie';
     final prefs = await _loadPrefs();
-    final language = _apiLanguage(prefs);
+    final language = await _apiLanguage(prefs);
 
     final genreMap = isTv ? tvGenreIds : movieGenreIds;
     final genreId = genreMap[genero]; // null = Recientes
@@ -181,6 +179,11 @@ class TmdbDiscoverService {
 
     if (genreId != null) {
       query['with_genres'] = '$genreId';
+    }
+
+    // Excluir reality / talk / news / soap en Descubrir (no en búsqueda)
+    if (isTv && TmdbApis.tvWithoutGenres.isNotEmpty) {
+      query['without_genres'] = TmdbApis.tvWithoutGenres;
     }
 
     // Recientes: priorizar fecha reciente

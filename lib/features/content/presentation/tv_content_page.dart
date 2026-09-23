@@ -13,6 +13,7 @@ import '../../player/presentation/tv/tv_player_controller.dart';
 import '../../player/presentation/tv/tv_player_page.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_content.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_recommendations_api.dart';
+import '../../../supabase/guardados_service.dart';
 
 const kAccentColor = Color(0xFFE50914);
 const double _kEpisodeItemExtent =
@@ -34,45 +35,22 @@ class HistorialBus {
 }
 
 class GuardadosCache {
-  static const String _kKey = 'guardados_items';
-
+  /// Delega a GuardadosService (Supabase si hay usuario logueado, cache local si no).
   static Future<List<Map<String, dynamic>>> getAll() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList(_kKey) ?? [];
-    return raw
-        .map((e) {
-          try {
-            return Map<String, dynamic>.from(jsonDecode(e));
-          } catch (_) {
-            return <String, dynamic>{};
-          }
-        })
-        .where((m) => m.isNotEmpty)
-        .toList();
+    return GuardadosService.getAll();
   }
 
   static Future<bool> isSaved(int idcontenido) async {
-    final items = await getAll();
-    return items.any((e) => e['idcontenido'] == idcontenido);
+    return GuardadosService.isSaved(idcontenido);
   }
 
   static Future<bool> toggle(Map<String, dynamic> item) async {
-    final prefs = await SharedPreferences.getInstance();
-    final items = await getAll();
-    final id = item['idcontenido'];
-    final exists = items.any((e) => e['idcontenido'] == id);
-
-    if (exists) {
-      items.removeWhere((e) => e['idcontenido'] == id);
-    } else {
-      items.insert(0, item);
-    }
-
-    await prefs.setStringList(_kKey, items.map((e) => jsonEncode(e)).toList());
+    final result = await GuardadosService.toggle(item);
     GuardadosBus.bump();
-    return !exists;
+    return result;
   }
 }
+
 
 class EpisodeProgressInfo {
   final int season;
@@ -415,13 +393,17 @@ class _PageContenidoState extends State<PageContenido>
   Future<void> _toggleSaved() async {
     if (_data == null) return;
     final data = _data!;
+    final posterUrl = _firstUrl(data['poster_path']);
     final item = <String, dynamic>{
       'idcontenido': widget.idcontenido,
       'tmdb_id': _resolvedTmdbId,
       'media_type': _resolvedMediaType,
+      'tipo': data['type'] ?? _resolvedMediaType,
       'type': data['type'] ?? _resolvedMediaType,
       'title': data['title'],
-      'poster_path': _firstUrl(data['poster_path']),
+      'titulo': data['title'],
+      'poster': posterUrl,
+      'poster_path': posterUrl,
       'backdrop_path': _firstUrl(data['backdrop_path']),
       'vote_average': data['vote_average'],
       'addedAt': DateTime.now().toIso8601String(),

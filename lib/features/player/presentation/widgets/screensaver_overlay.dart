@@ -60,44 +60,54 @@ class ScreensaverOverlay extends StatelessWidget {
         Positioned(
           left: 36,
           bottom: 40,
-          child: isEpisode
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _buildLogo(
-                      logo: logo,
-                      title: title,
-                      maxWidth: _maxLogoWidthEpisode,
-                      height: 56,
-                      textSize: 24,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      episodeLabel!,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.85),
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                  ],
-                )
-              : _buildLogo(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Siempre: "Continuar viendo"
+                Text(
+                  'Continuar viendo',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // Logo o título (siempre a la izquierda)
+                _buildLogo(
                   logo: logo,
                   title: title,
-                  maxWidth: _maxLogoWidth,
-                  height: 64,
-                  textSize: 28,
+                  maxWidth: isEpisode ? _maxLogoWidthEpisode : _maxLogoWidth,
+                  height: isEpisode ? 56 : 64,
+                  textSize: isEpisode ? 24 : 28,
                 ),
+                // Capítulo / episodio (si existe)
+                if (isEpisode) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    episodeLabel!,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ],
     );
   }
 
   /// Construye el logo con ancho máximo y altura fija, sin deformar.
-  /// Si falla o no hay logo, muestra el título en texto.
+  /// Siempre alineado a la izquierda. Si falla o no hay logo, muestra el título.
   Widget _buildLogo({
     required String logo,
     required String title,
@@ -109,6 +119,7 @@ class ScreensaverOverlay extends StatelessWidget {
       title,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.left,
       style: TextStyle(
         color: Colors.white,
         fontSize: textSize,
@@ -118,18 +129,30 @@ class ScreensaverOverlay extends StatelessWidget {
 
     if (logo.isEmpty) return fallback;
 
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxWidth: maxWidth,
-        maxHeight: height,
-      ),
-      child: CachedNetworkImage(
-        imageUrl: logo,
-        height: height,
-        fit: BoxFit.contain,
-        alignment: Alignment.centerLeft,
-        memCacheHeight: (height * 2).round(),
-        errorWidget: (_, __, ___) => fallback,
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: maxWidth,
+          maxHeight: height,
+        ),
+        child: CachedNetworkImage(
+          imageUrl: logo,
+          height: height,
+          width: maxWidth,
+          fit: BoxFit.contain,
+          alignment: Alignment.centerLeft,
+          memCacheHeight: (height * 2).round(),
+          placeholder: (_, __) => SizedBox(
+            height: height,
+            width: maxWidth,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: fallback,
+            ),
+          ),
+          errorWidget: (_, __, ___) => fallback,
+        ),
       ),
     );
   }

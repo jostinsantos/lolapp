@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../tv_config_shared.dart';
+import '../../../../core/constants/tmdb_apis.dart';
 /// Pestaña Contenido — StatefulWidget independiente.
 class ContenidoTab extends StatefulWidget {
   final VoidCallback onRequestTabFocus;
@@ -139,6 +140,14 @@ class ContenidoTabState extends State<ContenidoTab>
       _spanishLatino = prefs.getBool('spanish_latino') ?? true;
       _spanishCastellano = prefs.getBool('spanish_castellano') ?? false;
       _english = prefs.getBool('english') ?? false;
+      if (_spanishLatino) {
+        _spanishCastellano = false;
+        _english = false;
+      } else if (_spanishCastellano) {
+        _english = false;
+      } else if (!_english) {
+        _spanishLatino = true;
+      }
       _disableNonLatinTitles =
           prefs.getBool('disable_non_latin_titles') ?? false;
     });
@@ -194,6 +203,25 @@ class ContenidoTabState extends State<ContenidoTab>
     await saveBool('regional_filter', value);
     if (!mounted) return;
     setState(() => _regionalPeru = value);
+  }
+
+  /// Solo un idioma de metadatos / API TMDB.
+  Future<void> _setMetadataLanguage(String which) async {
+    final latino = which == 'latino';
+    final cast = which == 'castellano';
+    final eng = which == 'english';
+    await saveBool('spanish_latino', latino);
+    await saveBool('spanish_castellano', cast);
+    await saveBool('english', eng);
+    if (latino) await TmdbApis.setLanguage('es-MX');
+    if (cast) await TmdbApis.setLanguage('es-ES');
+    if (eng) await TmdbApis.setLanguage('en-US');
+    if (!mounted) return;
+    setState(() {
+      _spanishLatino = latino;
+      _spanishCastellano = cast;
+      _english = eng;
+    });
   }
 
   void requestFirstFocus() => _btnTmdbEnrichment.requestFocus();
@@ -308,47 +336,45 @@ class ContenidoTabState extends State<ContenidoTab>
           onArrowUp: () => _btnRegionalPeru.requestFocus(),
           onArrowDown: () => _btnSpanishLatino.requestFocus(),
         ),
-        sectionTitle('IDIOMA DE METADATOS (TMDB)'),
+        sectionTitle('IDIOMA DE METADATOS (solo uno)'),
         SourceToggleCard(
           title: 'Español latino',
-          subtitleEnabled: 'Títulos y sinopsis en es-MX',
-          subtitleDisabled: 'Desactivado',
+          subtitleEnabled: 'API TMDB es-MX (activo)',
+          subtitleDisabled: 'Toca para activar',
           enabled: _spanishLatino,
           loading: false,
           icon: Icons.language_rounded,
           accentColor: const Color(0xFF22C55E),
           focusNode: _btnSpanishLatino,
-          onTap: () => _set(
-              'spanish_latino', !_spanishLatino, (v) => _spanishLatino = v),
+          onTap: () => _setMetadataLanguage('latino'),
           onArrowUp: () => _btnDisableNonLatin.requestFocus(),
           onArrowDown: () => _btnSpanishCastellano.requestFocus(),
         ),
         const SizedBox(height: 10),
         SourceToggleCard(
           title: 'Español castellano',
-          subtitleEnabled: 'Títulos y sinopsis en es-ES',
-          subtitleDisabled: 'Desactivado',
+          subtitleEnabled: 'API TMDB es-ES (activo)',
+          subtitleDisabled: 'Toca para activar',
           enabled: _spanishCastellano,
           loading: false,
           icon: Icons.language_rounded,
           accentColor: const Color(0xFF3B82F6),
           focusNode: _btnSpanishCastellano,
-          onTap: () => _set('spanish_castellano', !_spanishCastellano,
-              (v) => _spanishCastellano = v),
+          onTap: () => _setMetadataLanguage('castellano'),
           onArrowUp: () => _btnSpanishLatino.requestFocus(),
           onArrowDown: () => _btnEnglish.requestFocus(),
         ),
         const SizedBox(height: 10),
         SourceToggleCard(
           title: 'Inglés',
-          subtitleEnabled: 'Títulos y sinopsis en en-US',
-          subtitleDisabled: 'Desactivado',
+          subtitleEnabled: 'API TMDB en-US (activo)',
+          subtitleDisabled: 'Toca para activar',
           enabled: _english,
           loading: false,
           icon: Icons.language_rounded,
           accentColor: const Color(0xFFF59E0B),
           focusNode: _btnEnglish,
-          onTap: () => _set('english', !_english, (v) => _english = v),
+          onTap: () => _setMetadataLanguage('english'),
           onArrowUp: () => _btnSpanishCastellano.requestFocus(),
           onArrowDown: () => _btnHomeSessions.requestFocus(),
         ),

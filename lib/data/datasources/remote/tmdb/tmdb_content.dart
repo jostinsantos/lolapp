@@ -1,9 +1,10 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/constants/tmdb_apis.dart';
 
 class TmdbContentService {
-  static const String _tmdbKey = 'a2d9bbed370d9f678e34006f8750a5a5';
+  static const String _apiKeyFallback = 'a2d9bbed370d9f678e34006f8750a5a5'; // unused fallback
   static const String _base = 'https://api.themoviedb.org/3';
   static const String _imgBase = 'https://image.tmdb.org/t/p';
 
@@ -53,14 +54,7 @@ class TmdbContentService {
   };
 
   Future<String> _apiLanguage() async {
-    final p = await SharedPreferences.getInstance();
-    final latino = p.getBool('spanish_latino') ?? true;
-    final english = p.getBool('english') ?? false;
-    final castellano = p.getBool('spanish_castellano') ?? false;
-    if (latino) return 'es-MX';
-    if (english) return 'en-US';
-    if (castellano) return 'es-ES';
-    return 'es-MX';
+    return TmdbApis.getLanguage();
   }
 
   Future<({bool showSpecials, bool showUnreleasedEps})> _episodePrefs() async {
@@ -77,7 +71,7 @@ class TmdbContentService {
     required String language,
   }) async {
     final q = <String, String>{
-      'api_key': _tmdbKey,
+      'api_key': await TmdbApis.getApiKey(),
       'language': language,
       ...?query,
     };

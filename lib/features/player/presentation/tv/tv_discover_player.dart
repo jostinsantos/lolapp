@@ -335,7 +335,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _showEndPrompt = false;
   bool _hasHandledEnd = false;
   bool _showNextEpisodeCard = false;
-
+  bool _nextPromptUserDismissed = false; // <-- FALTA ESTO
   double? _introStartSec;
   double? _introEndSec;
   double? _outroStartSec;
@@ -915,71 +915,77 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final dur = value.duration;
     bool needsSetState = false;
 
-    if (shouldUpdatePosition) {
-      _currentPosition = value.position;
-      _lastPositionUpdateMs = nowMs;
-      final prevSkip = _showSkipIntro;
-      _updateSkipIntroVisibility();
-      if (prevSkip != _showSkipIntro) needsSetState = true;
+   if (shouldUpdatePosition) {
+  _currentPosition = value.position;
+  _lastPositionUpdateMs = nowMs;
+  final prevSkip = _showSkipIntro;
+  _updateSkipIntroVisibility();
+  if (prevSkip != _showSkipIntro) needsSetState = true;
+  needsSetState = true;
+
+  if (_totalDuration.inSeconds > 30) {
+    final remaining = _totalDuration - _currentPosition;
+    final nextTrigger =
+        _isNextTriggerReached() && remaining > const Duration(seconds: 2);
+
+    final shouldShowCard = nextTrigger &&
+        (_siguiente != null || _recomendaciones.isNotEmpty) &&
+        !_nextPromptUserDismissed &&
+        !_showBecauseYouWatched;
+
+    if (shouldShowCard != _showNextEpisodeCard) {
+      _showNextEpisodeCard = shouldShowCard;
       needsSetState = true;
-
-      if (_totalDuration.inSeconds > 30) {
-        final remaining = _totalDuration - _currentPosition;
-        final nextTrigger =
-            _isNextTriggerReached() && remaining > const Duration(seconds: 2);
-        if (nextTrigger != _showNextEpisodeCard) {
-          _showNextEpisodeCard = nextTrigger;
-          needsSetState = true;
-          if (nextTrigger) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted && !_isDisposing && _showNextEpisodeCard) {
-                _nextPromptFocusNode.requestFocus();
-              }
-            });
-          } else if (_nextPromptFocusNode.hasFocus) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted && !_isDisposing) {
-                if (_showControls) {
-                  _seekBarFocusNode.requestFocus();
-                } else {
-                  _videoFocusNode.requestFocus();
-                }
-              }
-            });
+      if (shouldShowCard) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_isDisposing && _showNextEpisodeCard) {
+            _nextPromptFocusNode.requestFocus();
           }
-        }
-
-        if (widget.tipo == 'movie' &&
-            !_hasShownBecauseYouWatched &&
-            nextTrigger &&
-            remaining > const Duration(seconds: 2) &&
-            _recomendaciones.isNotEmpty) {
-          _hasShownBecauseYouWatched = true;
-          _showBecauseYouWatched = true;
-          _showNextEpisodeCard = false;
-          needsSetState = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && !_isDisposing && _showBecauseYouWatched) {
-              _byProducirSiguienteFocusNode.requestFocus();
+        });
+      } else if (_nextPromptFocusNode.hasFocus) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_isDisposing) {
+            if (_showControls) {
+              _seekBarFocusNode.requestFocus();
+            } else {
+              _videoFocusNode.requestFocus();
             }
-          });
-        }
-
-        final nearEnd = nextTrigger;
-        if (nearEnd != _showEndPrompt) {
-          _showEndPrompt = nearEnd;
-          needsSetState = true;
-        }
-
-        if (!_hasHandledEnd &&
-            _currentPosition >= _totalDuration - const Duration(seconds: 1)) {
-          _hasHandledEnd = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && !_isDisposing) _handleVideoEnded();
-          });
-        }
+          }
+        });
       }
     }
+
+    if (widget.tipo == 'movie' &&
+        !_hasShownBecauseYouWatched &&
+        nextTrigger &&
+        remaining > const Duration(seconds: 2) &&
+        _recomendaciones.isNotEmpty) {
+      _hasShownBecauseYouWatched = true;
+      _showBecauseYouWatched = true;
+      _showNextEpisodeCard = false;
+      needsSetState = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_isDisposing && _showBecauseYouWatched) {
+          _byProducirSiguienteFocusNode.requestFocus();
+        }
+      });
+    }
+
+    final nearEnd = nextTrigger;
+    if (nearEnd != _showEndPrompt) {
+      _showEndPrompt = nearEnd;
+      needsSetState = true;
+    }
+
+    if (!_hasHandledEnd &&
+        _currentPosition >= _totalDuration - const Duration(seconds: 1)) {
+      _hasHandledEnd = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_isDisposing) _handleVideoEnded();
+      });
+    }
+  }
+}
 
     if (newPlaying != _isPlaying) {
       _isPlaying = newPlaying;
@@ -2063,30 +2069,40 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   bottom: (_showControls || _showToolbarOnly)
                       ? (_showSeasonsAndEpisodes ? 290.0 : 160.0)
                       : 56.0,
-                  child: NextEpisodePrompt(
-                    thumbnailUrl: _nextPromptThumb(),
-                    titleLine: _nextPromptTitle(),
-                    subtitleLine: '',
-                    countdownText: '',
-                    isTv: widget.tipo == 'tv',
-                    focusNode: _nextPromptFocusNode,
-                    onPlay: _goNextEpisode,
-                    onDismiss: () {
-                      setState(() => _showNextEpisodeCard = false);
-                      _videoFocusNode.requestFocus();
-                    },
-                    onNavigateDown: () {
-                      setState(() {
-                        _showControls = true;
-                        _currentRow = 1;
-                        _recalcularHoraFin();
-                      });
-                      _seekBarFocusNode.requestFocus();
-                      _scheduleHideControls();
-                    },
-                    accentColor: accentOrange,
-                    optimizeTmdbUrl: _optimizeTmdbUrl,
-                  ),
+                 child: NextEpisodePrompt(
+  thumbnailUrl: _nextPromptThumb(),
+  titleLine: _nextPromptTitle(),
+  subtitleLine: '',
+  countdownText: '',
+  isTv: widget.tipo == 'tv',
+  focusNode: _nextPromptFocusNode,
+  visible: _showNextEpisodeCard,
+  controlsVisible: _showControls || _showToolbarOnly,
+  autoHideMs: 10000,
+  onPlay: _goNextEpisode,
+  onDismiss: () {
+    setState(() {
+      _showNextEpisodeCard = false;
+      _nextPromptUserDismissed = true;
+    });
+    _videoFocusNode.requestFocus();
+  },
+  onAutoHide: () {
+    setState(() => _showNextEpisodeCard = false);
+    _videoFocusNode.requestFocus();
+  },
+  onNavigateDown: () {
+    setState(() {
+      _showControls = true;
+      _currentRow = 1;
+      _recalcularHoraFin();
+    });
+    _seekBarFocusNode.requestFocus();
+    _scheduleHideControls();
+  },
+  accentColor: accentOrange,
+  optimizeTmdbUrl: _optimizeTmdbUrl,
+),
                 ),
 
               if (!_isLoading &&

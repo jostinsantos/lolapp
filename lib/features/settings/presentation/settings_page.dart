@@ -19,7 +19,12 @@ import 'player/player_section.dart';
 import 'sources/sources_section.dart';
 import 'cache/cache_section.dart';
 import 'downloads/downloads_section.dart';
+import 'supabase/supabase_section.dart';
 import '../../../presentation/mobile/mobile_shell.dart';
+import '../../../core/constants/tmdb_apis.dart';
+import '../../../supabase/supabase_config.dart';
+import '../../profile/presentation/profile_selection_page.dart';
+
 class ConfigPage extends StatefulWidget {
   const ConfigPage({super.key});
 
@@ -30,6 +35,8 @@ class ConfigPage extends StatefulWidget {
 class _ConfigPageState extends State<ConfigPage> {
   bool _loading = true;
   bool _loadingSettings = true;
+  bool _supabaseActive = false;
+  String? _supabaseUserName;
   String? _error;
   Map<String, dynamic>? _versionData;
 
@@ -192,11 +199,30 @@ class _ConfigPageState extends State<ConfigPage> {
       _spanishLatino = prefs.getBool('spanish_latino') ?? true;
       _spanishCastellano = prefs.getBool('spanish_castellano') ?? false;
       _english = prefs.getBool('english') ?? false;
+      // Solo un idioma de metadatos activo
+      if (_spanishLatino) {
+        _spanishCastellano = false;
+        _english = false;
+      } else if (_spanishCastellano) {
+        _english = false;
+      } else if (!_english) {
+        _spanishLatino = true;
+      }
       _disableNonLatinTitles =
           prefs.getBool('disable_non_latin_titles') ?? false;
 
       _loadingSettings = false;
     });
+
+    // Estado Supabase (para tarjeta Cambiar perfil)
+    final sbActive = await SupabaseConfig.isSupabaseActive();
+    final sbName = await SupabaseConfig.getCurrentUserName();
+    if (mounted) {
+      setState(() {
+        _supabaseActive = sbActive;
+        _supabaseUserName = sbName;
+      });
+    }
   }
 
   Future<void> _saveBool(String key, bool value) async {
@@ -466,22 +492,49 @@ class _ConfigPageState extends State<ConfigPage> {
     await _saveBool('regional_peru', value);
   }
 
-  Future<void> _setSpanishLatino(bool value) async {
+  /// Idioma de metadatos / API TMDB: solo uno activo.
+  Future<void> _setMetadataLanguage(String which) async {
     if (!mounted) return;
-    setState(() => _spanishLatino = value);
-    await _saveBool('spanish_latino', value);
+    final latino = which == 'latino';
+    final cast = which == 'castellano';
+    final eng = which == 'english';
+    setState(() {
+      _spanishLatino = latino;
+      _spanishCastellano = cast;
+      _english = eng;
+    });
+    await _saveBool('spanish_latino', latino);
+    await _saveBool('spanish_castellano', cast);
+    await _saveBool('english', eng);
+    // Sincronizar idioma real de la API TMDB
+    if (latino) await TmdbApis.setLanguage('es-MX');
+    if (cast) await TmdbApis.setLanguage('es-ES');
+    if (eng) await TmdbApis.setLanguage('en-US');
+  }
+
+  Future<void> _setSpanishLatino(bool value) async {
+    if (value) {
+      await _setMetadataLanguage('latino');
+    } else {
+      // No permitir dejar todos apagados → volver a latino
+      await _setMetadataLanguage('latino');
+    }
   }
 
   Future<void> _setSpanishCastellano(bool value) async {
-    if (!mounted) return;
-    setState(() => _spanishCastellano = value);
-    await _saveBool('spanish_castellano', value);
+    if (value) {
+      await _setMetadataLanguage('castellano');
+    } else {
+      await _setMetadataLanguage('latino');
+    }
   }
 
   Future<void> _setEnglish(bool value) async {
-    if (!mounted) return;
-    setState(() => _english = value);
-    await _saveBool('english', value);
+    if (value) {
+      await _setMetadataLanguage('english');
+    } else {
+      await _setMetadataLanguage('latino');
+    }
   }
 
   Future<void> _setDisableNonLatinTitles(bool value) async {
@@ -1164,6 +1217,30 @@ class _ConfigPageState extends State<ConfigPage> {
                 padding: EdgeInsets.fromLTRB(16, 8, 16, listBottomPad),
                 children: [
                   _buildSocialRow(),
+                  if (_supabaseActive) ...[
+                    const SizedBox(height: 8),
+                    _buildSectionCard(
+                      title: 'Cambiar perfil',
+                      subtitle: _supabaseUserName != null
+                          ? 'Perfil activo: $_supabaseUserName'
+                          : 'Elige otro perfil de Supabase',
+                      icon: Icons.switch_account_rounded,
+                      accent: const Color(0xFF3ECF8E),
+                      onTap: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => ProfileSelectionPage(
+                              allowDismiss: true,
+                              onProfileSelected: () {
+                                Navigator.of(context).pop();
+                              },
+                            ),
+                          ),
+                        );
+                        await _loadAllSettings();
+                      },
+                    ),
+                  ],
                   _buildVersionCard(),
                   const SizedBox(height: 8),
                   _buildSectionCard(
@@ -1341,6 +1418,18 @@ class _ConfigPageState extends State<ConfigPage> {
                     ),
                   ),
                   _buildSectionCard(
+                    title: 'Supabase',
+                    subtitle: 'Sincronizar perfiles y guardados en la nube',
+                    icon: Icons.cloud_sync_rounded,
+                    accent: const Color(0xFF3ECF8E),
+                    onTap: () => _openSection(
+                      title: 'Supabase',
+                      icon: Icons.cloud_sync_rounded,
+                      accent: const Color(0xFF3ECF8E),
+                      builder: (refresh) => const SupabaseSection(),
+                    ),
+                  ),
+                  _buildSectionCard(
                     title: 'Caché',
                     subtitle: 'Historial, guardados y servidores',
                     icon: Icons.storage_rounded,
@@ -1365,6 +1454,7 @@ class _ConfigPageState extends State<ConfigPage> {
     );
   }
 }
+
 
 class _SocialItem {
   final String name;

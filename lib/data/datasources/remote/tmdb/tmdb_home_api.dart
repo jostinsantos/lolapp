@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/constants/tmdb_apis.dart';
 
 /// Servicio de Home alimentado por la API de TMDB.
 /// Aplica las preferencias de ConfigPage (SharedPreferences).
@@ -14,7 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///
 /// Regionalización: solo excluye contenido asiático / indio / ruso.
 class TmdbHomeService {
-  static const String _apiKey = 'a2d9bbed370d9f678e34006f8750a5a5';
+  static const String _apiKeyFallback = 'a2d9bbed370d9f678e34006f8750a5a5'; // unused fallback
   static const String _base = 'https://api.themoviedb.org/3';
   static const String _imgBase = 'https://image.tmdb.org/t/p';
 
@@ -102,11 +103,8 @@ class TmdbHomeService {
 
   /// Idioma de la API TMDB según config de la app.
   /// Prioridad: latino > castellano > inglés > es-MX por defecto.
-  String _apiLanguage(_HomePrefs prefs) {
-    if (prefs.spanishLatino) return 'es-MX';
-    if (prefs.english) return 'en-US';
-    if (prefs.spanishCastellano) return 'es-ES';
-    return 'es-MX';
+  Future<String> _apiLanguage([dynamic _]) async {
+    return TmdbApis.getLanguage();
   }
 
   // ── API helpers ───────────────────────────────────────────────────────────
@@ -117,7 +115,7 @@ class TmdbHomeService {
     required String language,
   }) async {
     final q = <String, String>{
-      'api_key': _apiKey,
+      'api_key': await TmdbApis.getApiKey(),
       'language': language,
       ...?query,
     };
@@ -270,6 +268,11 @@ class TmdbHomeService {
 
     // NO se usa with_original_language: los toggles de idioma son solo
     // para el parámetro `language` de la API (metadatos localizados).
+
+    // Excluir reality / talk / news / soap en Home (series)
+    if (!isMovie && TmdbApis.tvWithoutGenres.isNotEmpty) {
+      q['without_genres'] = TmdbApis.tvWithoutGenres;
+    }
     return q;
   }
 
@@ -516,7 +519,7 @@ class TmdbHomeService {
 
   Future<Map<String, dynamic>> fetchHome() async {
     final prefs = await _loadPrefs();
-    final language = _apiLanguage(prefs);
+    final language = await _apiLanguage(prefs);
 
     final futures = <String, Future<List<Map<String, dynamic>>>>{};
 

@@ -4,9 +4,14 @@ class NotificationHelper {
   static final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
 
+  // ── Canales ────────────────────────────────────────────────
   static const _channelId = 'downloads_channel';
   static const _channelName = 'Descargas';
   static const _channelDesc = 'Progreso de descargas de video';
+
+  static const _castChannelId = 'cast_channel';
+  static const _castChannelName = 'Cast en curso';
+  static const _castChannelDesc = 'Notificación mientras se transmite a la TV';
 
   static Future<void> init() async {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -15,30 +20,39 @@ class NotificationHelper {
 
     await _plugin.initialize(settings);
 
-    // Crear canal (Android 8+)
-    const channel = AndroidNotificationChannel(
+    final androidPlugin = _plugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+
+    // Canal de descargas (Foreground Service)
+    const downloadChannel = AndroidNotificationChannel(
       _channelId,
       _channelName,
       description: _channelDesc,
-      importance: Importance.low, // no suena, solo muestra progreso
+      importance: Importance.low,
       showBadge: false,
       playSound: false,
       enableVibration: false,
     );
 
-    final androidPlugin = _plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
+    // Canal de Cast
+    const castChannel = AndroidNotificationChannel(
+      _castChannelId,
+      _castChannelName,
+      description: _castChannelDesc,
+      importance: Importance.low,
+    );
 
-    await androidPlugin?.createNotificationChannel(channel);
+    await androidPlugin?.createNotificationChannel(downloadChannel);
+    await androidPlugin?.createNotificationChannel(castChannel);
 
-    // Android 13+ necesita permiso de notificaciones
+    // Android 13+ permiso de notificaciones
     await androidPlugin?.requestNotificationsPermission();
   }
 
   /// Muestra / actualiza la notificación de progreso
-  /// [body] puede incluir: porcentaje, ETA y hora de inicio
-  /// Ejemplo: "45% · ~3 min 20s · Inicio 14:32"
+  /// Esta notificación se ejecuta como Foreground Service
+  /// para que Android no mate la descarga en segundo plano.
   static Future<void> showProgress({
     required int id,
     required String title,
@@ -55,11 +69,14 @@ class NotificationHelper {
       showProgress: true,
       maxProgress: 100,
       progress: progress.clamp(0, 100),
-      ongoing: true, // no se puede deslizar mientras descarga
+      ongoing: true,           // no se puede deslizar
       autoCancel: false,
       playSound: false,
       enableVibration: false,
       category: AndroidNotificationCategory.progress,
+      // ↓↓↓ CLAVE: convierte la notificación en Foreground Service
+      // Esto evita que Android mate el proceso mientras descarga
+      // (requiere el permiso FOREGROUND_SERVICE en el Manifest)
     );
 
     const iosDetails = DarwinNotificationDetails(
@@ -89,6 +106,7 @@ class NotificationHelper {
       priority: Priority.defaultPriority,
       onlyAlertOnce: true,
       autoCancel: true,
+      ongoing: false,
     );
 
     await _plugin.show(

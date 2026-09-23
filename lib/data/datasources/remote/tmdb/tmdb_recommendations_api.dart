@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../../../../core/constants/tmdb_apis.dart';
 
 /// Servicio TMDB de recomendaciones (mismo estilo que TmdbContentService).
 ///
@@ -9,7 +10,7 @@ import 'package:http/http.dart' as http;
 ///
 /// Idioma: es-MX → en-US → es-ES
 class TmdbRecommendationsService {
-  static const String _apiKey = 'a2d9bbed370d9f678e34006f8750a5a5';
+  static const String _apiKeyFallback = 'a2d9bbed370d9f678e34006f8750a5a5'; // unused fallback
   static const String _base = 'https://api.themoviedb.org/3';
 
   static const List<String> _langPriority = ['es-MX', 'en-US', 'es-ES'];
@@ -81,7 +82,7 @@ class TmdbRecommendationsService {
       try {
         final uri = Uri.parse(
           '$_base/$mt/$tmdbId'
-          '?api_key=$_apiKey'
+          '?api_key=${await TmdbApis.getApiKey()}'
           '&language=$lang'
           '&append_to_response=external_ids,images'
           '&include_image_language=${lang.split('-').first},null',
@@ -187,7 +188,7 @@ class TmdbRecommendationsService {
     for (final lang in _langPriority) {
       try {
         final uri = Uri.parse(
-          '$_base/collection/$collectionId?api_key=$_apiKey&language=$lang',
+          '$_base/collection/$collectionId?api_key=${await TmdbApis.getApiKey()}&language=$lang',
         );
         final res = await http.get(uri).timeout(const Duration(seconds: 12));
         if (res.statusCode != 200) continue;
@@ -209,7 +210,7 @@ class TmdbRecommendationsService {
     for (final lang in _langPriority) {
       try {
         final uri = Uri.parse(
-          '$pathWithoutQuery?api_key=$_apiKey&language=$lang&page=1',
+          '$pathWithoutQuery?api_key=${await TmdbApis.getApiKey()}&language=$lang&page=1',
         );
         final res = await http.get(uri).timeout(const Duration(seconds: 12));
         if (res.statusCode != 200) continue;

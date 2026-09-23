@@ -8,6 +8,7 @@ import 'sources/tv_sources_tab.dart';
 import 'appearance/tv_appearance_tab.dart';
 import 'cache/tv_cache_tab.dart';
 import 'player/tv_player_tab.dart';
+import 'supabase/tv_supabase_tab.dart';
 enum _ConfigTab {
   contenido,
   actualizaciones,
@@ -15,6 +16,7 @@ enum _ConfigTab {
   apariencia,
   cache,
   player,
+  supabase,
 }
 
 class ConfigPage extends StatefulWidget {
@@ -46,6 +48,7 @@ class ConfigPageState extends State<ConfigPage>
   final GlobalKey<AparienciaTabState> _aparienciaKey = GlobalKey();
   final GlobalKey<CacheTabState> _cacheKey = GlobalKey();
   final GlobalKey<PlayerTabState> _playerKey = GlobalKey();
+  final GlobalKey<TvSupabaseTabState> _supabaseKey = GlobalKey();
 
   static const _tabLabels = [
     'Contenido',
@@ -54,6 +57,7 @@ class ConfigPageState extends State<ConfigPage>
     'Apariencia',
     'Caché',
     'Player',
+    'Supabase',
   ];
 
   @override
@@ -153,6 +157,8 @@ class ConfigPageState extends State<ConfigPage>
         return _cacheKey.currentState;
       case _ConfigTab.player:
         return _playerKey.currentState;
+      case _ConfigTab.supabase:
+        return _supabaseKey.currentState;
     }
   }
 
@@ -189,6 +195,11 @@ class ConfigPageState extends State<ConfigPage>
       case _ConfigTab.player:
         return PlayerTab(
           key: _playerKey,
+          onRequestTabFocus: _focusCurrentTab,
+        );
+      case _ConfigTab.supabase:
+        return TvSupabaseTab(
+          key: _supabaseKey,
           onRequestTabFocus: _focusCurrentTab,
         );
     }

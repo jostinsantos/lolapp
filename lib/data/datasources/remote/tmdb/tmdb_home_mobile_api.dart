@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/constants/tmdb_apis.dart';
 
 /// Servicio de Home (móvil) alimentado por TMDB.
 /// Misma lógica de preferencias/filtros que TmdbHomeService (TV),
@@ -9,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///
 /// API key: a2d9bbed370d9f678e34006f8750a5a5
 class TmdbHomeMobileService {
-  static const String _apiKey = 'a2d9bbed370d9f678e34006f8750a5a5';
+  static const String _apiKeyFallback = 'a2d9bbed370d9f678e34006f8750a5a5'; // unused fallback
   static const String _base = 'https://api.themoviedb.org/3';
   static const String _imgBase = 'https://image.tmdb.org/t/p';
 
@@ -59,11 +60,8 @@ class TmdbHomeMobileService {
     );
   }
 
-  String _apiLanguage(_HomePrefs prefs) {
-    if (prefs.spanishLatino) return 'es-MX';
-    if (prefs.english) return 'en-US';
-    if (prefs.spanishCastellano) return 'es-ES';
-    return 'es-MX';
+  Future<String> _apiLanguage([dynamic _]) async {
+    return TmdbApis.getLanguage();
   }
 
   // ── API helpers ───────────────────────────────────────────────────────────
@@ -74,7 +72,7 @@ class TmdbHomeMobileService {
     required String language,
   }) async {
     final q = <String, String>{
-      'api_key': _apiKey,
+      'api_key': await TmdbApis.getApiKey(),
       'language': language,
       ...?query,
     };
@@ -213,6 +211,9 @@ class TmdbHomeMobileService {
       } else {
         q['first_air_date.lte'] = stamp;
       }
+    }
+    if (!isMovie && TmdbApis.tvWithoutGenres.isNotEmpty) {
+      q['without_genres'] = TmdbApis.tvWithoutGenres;
     }
     return q;
   }
@@ -521,7 +522,7 @@ class TmdbHomeMobileService {
 
   Future<Map<String, dynamic>> fetchHome() async {
     final prefs = await _loadPrefs();
-    final language = _apiLanguage(prefs);
+    final language = await _apiLanguage(prefs);
 
     final futures = <String, Future<List<Map<String, dynamic>>>>{};
 

@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../../data/datasources/remote/tmdb/tmdb_content.dart';
+
 class BecauseYouWatchedOverlay extends StatefulWidget {
   final VideoPlayerController videoController;
   final String currentTitle;
@@ -73,6 +74,11 @@ class _BecauseYouWatchedOverlayState extends State<BecauseYouWatchedOverlay> {
     _logo = widget.nextLogo;
     _cargarDetalle();
     _startCountdown();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        widget.producirSiguienteFocusNode.requestFocus();
+      }
+    });
   }
 
   @override
@@ -187,6 +193,7 @@ class _BecauseYouWatchedOverlayState extends State<BecauseYouWatchedOverlay> {
           onTap();
           return KeyEventResult.handled;
         }
+        // Atrás = cancelar countdown y seguir créditos (permite salir del overlay)
         if (widget.isBackKey(e)) {
           _cancelCountdown();
           widget.onContinuarCreditos();
@@ -284,11 +291,13 @@ class _BecauseYouWatchedOverlayState extends State<BecauseYouWatchedOverlay> {
             ),
           ),
         ),
-        Positioned(
-          top: 20,
-          right: 24,
-          child: _MiniPlayer(controller: widget.videoController),
-        ),
+        // Mini-player solo si el controller sigue vivo
+        if (widget.videoController.value.isInitialized)
+          Positioned(
+            top: 20,
+            right: 24,
+            child: _MiniPlayer(controller: widget.videoController),
+          ),
         SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(48, 0, 48, 40),
@@ -441,6 +450,9 @@ class _MiniPlayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!controller.value.isInitialized) {
+      return const SizedBox.shrink();
+    }
     final vw = controller.value.size.width;
     final vh = controller.value.size.height;
     final aspect = (vw > 0 && vh > 0) ? vw / vh : 16 / 9;

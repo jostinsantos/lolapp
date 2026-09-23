@@ -35,6 +35,100 @@ class _SubtitleCue {
 
 enum _VideoFitMode { original, ratio16_9, ratio21_9, ratio16_10, ratio4_3 }
 
+
+/// Track del seek bar: gris + segmentos verdes (intro/outro) + naranja (progreso).
+/// El thumb del Slider queda siempre alineado con el final del naranja.
+class _SegmentedVideoTrackShape extends SliderTrackShape
+    with BaseSliderTrackShape {
+  final double? introStart;
+  final double? introEnd;
+  final double? outroStart;
+  final double? outroEnd;
+  final double? recapStart;
+  final double? recapEnd;
+  final double nextThreshold;
+  final Color activeColor;
+  final Color inactiveColor;
+  final Color segmentColor;
+
+  const _SegmentedVideoTrackShape({
+    this.introStart,
+    this.introEnd,
+    this.outroStart,
+    this.outroEnd,
+    this.recapStart,
+    this.recapEnd,
+    this.nextThreshold = 0.95,
+    required this.activeColor,
+    required this.inactiveColor,
+    required this.segmentColor,
+  });
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset offset, {
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required Animation<double> enableAnimation,
+    required TextDirection textDirection,
+    required Offset thumbCenter,
+    Offset? secondaryOffset,
+    bool isDiscrete = false,
+    bool isEnabled = false,
+    double additionalActiveTrackHeight = 0,
+  }) {
+    final trackHeight = sliderTheme.trackHeight ?? 4.0;
+    final trackRect = getPreferredRect(
+      parentBox: parentBox,
+      offset: offset,
+      sliderTheme: sliderTheme,
+      isEnabled: isEnabled,
+      isDiscrete: isDiscrete,
+    );
+
+    final cy = trackRect.center.dy;
+    final left = trackRect.left;
+    final right = trackRect.right;
+    final width = trackRect.width;
+    if (width <= 0) return;
+
+    final r = Radius.circular(trackHeight / 2);
+    final canvas = context.canvas;
+
+    void drawSeg(double a, double b, Color color) {
+      final x1 = left + (a.clamp(0.0, 1.0) * width);
+      final x2 = left + (b.clamp(0.0, 1.0) * width);
+      if (x2 <= x1) return;
+      canvas.drawRRect(
+        RRect.fromLTRBR(x1, cy - trackHeight / 2, x2, cy + trackHeight / 2, r),
+        Paint()..color = color,
+      );
+    }
+
+    // 1) Fondo inactivo completo
+    drawSeg(0.0, 1.0, inactiveColor);
+
+    // 2) Zonas verdes (intro / recap / outro / umbral)
+    if (introStart != null && introEnd != null) {
+      drawSeg(introStart!, introEnd!, segmentColor);
+    }
+    if (recapStart != null && recapEnd != null) {
+      drawSeg(recapStart!, recapEnd!, segmentColor.withValues(alpha: 0.85));
+    }
+    if (outroStart != null) {
+      final oEnd = outroEnd ?? 1.0;
+      drawSeg(outroStart!, oEnd, segmentColor);
+    } else if (nextThreshold > 0 && nextThreshold < 1) {
+      drawSeg(nextThreshold, 1.0, segmentColor);
+    }
+
+    // 3) Progreso activo (naranja) hasta el thumb — siempre alineado
+    final activeEnd = ((thumbCenter.dx - left) / width).clamp(0.0, 1.0);
+    drawSeg(0.0, activeEnd, activeColor);
+  }
+}
+
 class PlayerScreen extends StatefulWidget {
   final String videoUrl;
   final int idcontenido;
@@ -81,6 +175,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isResolving = false;
   bool _allServersFailed = false;
   bool _preloadTriggered = false;
+  /// true cuando ya se precargó el siguiente (botón naranja).
+  bool _nextPreloaded = false;
+  /// Usuario cerró el prompt de siguiente manualmente.
+  bool _nextPromptUserDismissed = false;
+  bool _nextPromptAutoHidden = false;
+  Timer? _nextPromptHideTimer;
 
   late VideoPlayerController _controller;
   bool _isLoading = true;
@@ -279,51 +379,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     final forced = _forcedAspectRatio;
+    // Aspecto objetivo: forzado por el usuario o el nativo del vídeo.
+    final targetAspect = forced ?? (vw / vh);
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final maxW = constraints.maxWidth;
-        final maxH = constraints.maxHeight;
-        if (maxW <= 0 || maxH <= 0) {
-          return const ColoredBox(color: Colors.black);
-        }
-
-        if (forced == null) {
-          final videoAspect = vw / vh;
-          late final double w;
-          late final double h;
-          if (maxW / maxH > videoAspect) {
-            h = maxH;
-            w = h * videoAspect;
-          } else {
-            w = maxW;
-            h = w / videoAspect;
+    // Fire TV / Firestick: siempre mapear la textura a un SizedBox con
+    // FittedBox.fill. Evita el recuadro + pantalla verde (SurfaceView)
+    // que aparece cuando el VideoPlayer no llena el área de layout.
+    return ColoredBox(
+      color: Colors.black,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final maxW = constraints.maxWidth;
+          final maxH = constraints.maxHeight;
+          if (maxW <= 0 || maxH <= 0) {
+            return const ColoredBox(color: Colors.black);
           }
-          return ColoredBox(
-            color: Colors.black,
-            child: Center(
-              child: SizedBox(
-                width: w,
-                height: h,
-                child: VideoPlayer(_controller),
-              ),
-            ),
-          );
-        }
 
-        late final double frameW;
-        late final double frameH;
-        if (maxW / maxH > forced) {
-          frameH = maxH;
-          frameW = frameH * forced;
-        } else {
-          frameW = maxW;
-          frameH = frameW / forced;
-        }
+          late final double frameW;
+          late final double frameH;
+          if (maxW / maxH > targetAspect) {
+            frameH = maxH;
+            frameW = frameH * targetAspect;
+          } else {
+            frameW = maxW;
+            frameH = frameW / targetAspect;
+          }
 
-        return ColoredBox(
-          color: Colors.black,
-          child: Center(
+          return Center(
             child: SizedBox(
               width: frameW,
               height: frameH,
@@ -336,18 +418,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
   bool get _showSeasonsAndEpisodes => _currentRow >= 3;
 
+  bool get _hasRealNext {
+    if (widget.tipo == 'tv') {
+      return _siguiente != null &&
+          (_siguiente!['temporada'] != null ||
+              _siguiente!['capitulo'] != null ||
+              _siguiente!['numero'] != null);
+    }
+    return _recomendaciones.isNotEmpty;
+  }
+
   List<FocusNode> get _visibleActionNodes {
     final list = <FocusNode>[_playPauseFocusNode, _restartFocusNode];
-    if (widget.tipo == 'tv' ||
-        (_showEndPrompt && _recomendaciones.isNotEmpty)) {
+    if (_showNextButton) {
       list.add(_nextFocusNode);
     }
     list.addAll([
@@ -360,8 +451,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return list;
   }
 
-  bool get _showNextButton =>
-      widget.tipo == 'tv' || (_showEndPrompt && _recomendaciones.isNotEmpty);
+  bool get _showNextButton => _hasRealNext;
 
   int _lastPositionUpdateMs = 0;
   static const int _positionThrottleMs = 250;
@@ -377,6 +467,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double? _recapStartSec;
   double? _recapEndSec;
   bool _showSkipIntro = false;
+  /// Usuario descartó el skip (atrás) en este intervalo.
+  bool _skipIntroDismissed = false;
+  /// Auto-ocultado por timeout; no reaparece hasta abrir controles.
+  bool _skipIntroAutoHidden = false;
+  Timer? _skipIntroHideTimer;
+  /// 0.0 → 1.0 progreso de la barra de auto-hide (1 = recién mostrado).
+  double _skipIntroHideProgress = 1.0;
+  DateTime? _skipIntroHideStartedAt;
+  static const int _skipIntroAutoHideMs = 10000;
   final FocusNode _skipIntroFocusNode = FocusNode();
 
   double _nextThresholdPct = 0.95;
@@ -815,40 +914,197 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } catch (_) {}
   }
 
+  void _releaseOverlayFocusToSafe() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _isDisposing) return;
+      if (_showControls) {
+        _seekBarFocusNode.requestFocus();
+      } else if (_showToolbarOnly) {
+        final nodes = _visibleActionNodes;
+        if (nodes.isNotEmpty) {
+          nodes.first.requestFocus();
+        } else {
+          _videoFocusNode.requestFocus();
+        }
+      } else {
+        _videoFocusNode.requestFocus();
+      }
+    });
+  }
+
+  bool get _skipIntroActuallyVisible {
+    if (_introStartSec == null || _introEndSec == null) return false;
+    if (_showBecauseYouWatched) return false;
+    final pos = _currentPosition.inMilliseconds / 1000.0;
+    final inInterval = pos >= _introStartSec! && pos <= _introEndSec!;
+    if (!inInterval) return false;
+    // Nuvio: si dismissed, solo visible con controles abiertos
+    if (_skipIntroDismissed && !(_showControls || _showToolbarOnly)) {
+      return false;
+    }
+    // Auto-hidden: no mostrar mientras controles ocultos
+    if (_skipIntroAutoHidden && !(_showControls || _showToolbarOnly)) {
+      return false;
+    }
+    return true;
+  }
+
   void _updateSkipIntroVisibility() {
-    if (_introStartSec == null || _introEndSec == null) {
-      if (_showSkipIntro) _showSkipIntro = false;
+    final shouldShow = _skipIntroActuallyVisible;
+    if (shouldShow == _showSkipIntro) {
+      // Pausar / reanudar contador según controles
+      if (shouldShow) {
+        if (_showControls || _showToolbarOnly) {
+          _pauseSkipIntroHideTimer();
+        } else {
+          _resumeSkipIntroHideTimer();
+        }
+      }
       return;
     }
-    final pos = _currentPosition.inMilliseconds / 1000.0;
-    final visible = pos >= _introStartSec! && pos <= _introEndSec!;
-    if (visible != _showSkipIntro) {
-      _showSkipIntro = visible;
-      if (visible) {
+
+    final hadFocus = _skipIntroFocusNode.hasFocus;
+    _showSkipIntro = shouldShow;
+
+    if (shouldShow) {
+      _skipIntroAutoHidden = false;
+      _startSkipIntroHideTimer();
+      // Solo robar foco si no hay controles / overlays prioritarios
+      if (!(_showControls || _showToolbarOnly) &&
+          !_showNextEpisodeCard &&
+          !_showBecauseYouWatched) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && !_isDisposing && _showSkipIntro) {
             _skipIntroFocusNode.requestFocus();
           }
         });
-      } else if (_skipIntroFocusNode.hasFocus) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && !_isDisposing) {
-            if (_showControls) {
-              _seekBarFocusNode.requestFocus();
-            } else {
-              _videoFocusNode.requestFocus();
-            }
-          }
-        });
+      }
+    } else {
+      _stopSkipIntroHideTimer();
+      if (hadFocus) _releaseOverlayFocusToSafe();
+      // Al salir del intervalo, reset dismiss para el próximo
+      final pos = _currentPosition.inMilliseconds / 1000.0;
+      if (_introStartSec == null ||
+          _introEndSec == null ||
+          pos < _introStartSec! ||
+          pos > _introEndSec!) {
+        _skipIntroDismissed = false;
+        _skipIntroAutoHidden = false;
       }
     }
+  }
+
+  void _startSkipIntroHideTimer() {
+    _stopSkipIntroHideTimer();
+    _skipIntroHideProgress = 1.0;
+    _skipIntroHideStartedAt = DateTime.now();
+    // Tick cada 50ms para la barra inferior del botón
+    _skipIntroHideTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      if (!mounted || _isDisposing || !_showSkipIntro) {
+        _stopSkipIntroHideTimer();
+        return;
+      }
+      // Pausado mientras hay controles (como Nuvio)
+      if (_showControls || _showToolbarOnly) return;
+      final started = _skipIntroHideStartedAt;
+      if (started == null) return;
+      final elapsed = DateTime.now().difference(started).inMilliseconds;
+      final left = (_skipIntroAutoHideMs - elapsed).clamp(0, _skipIntroAutoHideMs);
+      final p = left / _skipIntroAutoHideMs;
+      if ((p - _skipIntroHideProgress).abs() > 0.01 || p <= 0) {
+        setState(() => _skipIntroHideProgress = p);
+      }
+      if (elapsed >= _skipIntroAutoHideMs) {
+        _stopSkipIntroHideTimer();
+        final hadFocus = _skipIntroFocusNode.hasFocus;
+        setState(() {
+          _skipIntroAutoHidden = true;
+          _showSkipIntro = false;
+          _skipIntroHideProgress = 0;
+        });
+        if (hadFocus) _releaseOverlayFocusToSafe();
+      }
+    });
+  }
+
+  void _pauseSkipIntroHideTimer() {
+    // Congela el tiempo restante recalculando startedAt al reanudar
+    if (_skipIntroHideStartedAt == null) return;
+    final elapsed = DateTime.now().difference(_skipIntroHideStartedAt!).inMilliseconds;
+    final left = (_skipIntroAutoHideMs - elapsed).clamp(0, _skipIntroAutoHideMs);
+    _skipIntroHideProgress = left / _skipIntroAutoHideMs;
+    // Marcar pausa: startedAt = null hasta resume
+    _skipIntroHideStartedAt = null;
+  }
+
+  void _resumeSkipIntroHideTimer() {
+    if (!_showSkipIntro || _skipIntroAutoHidden) return;
+    if (_skipIntroHideStartedAt != null) return; // ya corriendo
+    // Reanudar desde el progreso actual
+    final leftMs = (_skipIntroHideProgress * _skipIntroAutoHideMs).round();
+    _skipIntroHideStartedAt =
+        DateTime.now().subtract(Duration(milliseconds: _skipIntroAutoHideMs - leftMs));
+    if (_skipIntroHideTimer == null || !_skipIntroHideTimer!.isActive) {
+      _startSkipIntroHideTimerFromPaused();
+    }
+  }
+
+  void _startSkipIntroHideTimerFromPaused() {
+    _skipIntroHideTimer?.cancel();
+    _skipIntroHideTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      if (!mounted || _isDisposing || !_showSkipIntro) {
+        _stopSkipIntroHideTimer();
+        return;
+      }
+      if (_showControls || _showToolbarOnly) return;
+      final started = _skipIntroHideStartedAt;
+      if (started == null) return;
+      final elapsed = DateTime.now().difference(started).inMilliseconds;
+      final left = (_skipIntroAutoHideMs - elapsed).clamp(0, _skipIntroAutoHideMs);
+      final p = left / _skipIntroAutoHideMs;
+      if ((p - _skipIntroHideProgress).abs() > 0.01 || p <= 0) {
+        setState(() => _skipIntroHideProgress = p);
+      }
+      if (elapsed >= _skipIntroAutoHideMs) {
+        _stopSkipIntroHideTimer();
+        final hadFocus = _skipIntroFocusNode.hasFocus;
+        setState(() {
+          _skipIntroAutoHidden = true;
+          _showSkipIntro = false;
+          _skipIntroHideProgress = 0;
+        });
+        if (hadFocus) _releaseOverlayFocusToSafe();
+      }
+    });
+  }
+
+  void _stopSkipIntroHideTimer() {
+    _skipIntroHideTimer?.cancel();
+    _skipIntroHideTimer = null;
+    _skipIntroHideStartedAt = null;
+  }
+
+  void _dismissSkipIntro() {
+    _stopSkipIntroHideTimer();
+    final hadFocus = _skipIntroFocusNode.hasFocus;
+    setState(() {
+      _skipIntroDismissed = true;
+      _showSkipIntro = false;
+    });
+    if (hadFocus) _releaseOverlayFocusToSafe();
   }
 
   void _skipIntro() {
     if (_introEndSec == null || !_controllerReady) return;
     final target = Duration(milliseconds: (_introEndSec! * 1000).round());
     _controller.seekTo(target);
-    setState(() => _showSkipIntro = false);
+    _stopSkipIntroHideTimer();
+    setState(() {
+      _showSkipIntro = false;
+      _skipIntroDismissed = true;
+      _skipIntroAutoHidden = false;
+    });
+    _releaseOverlayFocusToSafe();
     _scheduleHideControls();
   }
 
@@ -1366,25 +1622,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
         final nextTrigger =
             _isNextTriggerReached() && remaining > const Duration(seconds: 2);
-        if (nextTrigger != _showNextEpisodeCard) {
-          _showNextEpisodeCard = nextTrigger;
+
+        // Solo mostrar tarjeta si hay siguiente real y el usuario no la descartó
+        final shouldShowCard = nextTrigger &&
+            _hasRealNext &&
+            !_nextPromptUserDismissed &&
+            !_showBecauseYouWatched &&
+            !(_nextPromptAutoHidden && !(_showControls || _showToolbarOnly));
+
+        if (shouldShowCard != _showNextEpisodeCard) {
+          _showNextEpisodeCard = shouldShowCard;
           needsSetState = true;
-          if (nextTrigger) {
+          if (shouldShowCard) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted && !_isDisposing && _showNextEpisodeCard) {
                 _nextPromptFocusNode.requestFocus();
               }
             });
-          } else if (_nextPromptFocusNode.hasFocus) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted && !_isDisposing) {
-                if (_showControls) {
-                  _seekBarFocusNode.requestFocus();
-                } else {
-                  _videoFocusNode.requestFocus();
-                }
-              }
-            });
+          } else {
+            _nextPromptHideTimer?.cancel();
+            if (_nextPromptFocusNode.hasFocus) {
+              _releaseOverlayFocusToSafe();
+            }
           }
         }
 
@@ -1396,6 +1655,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _hasShownBecauseYouWatched = true;
           _showBecauseYouWatched = true;
           _showNextEpisodeCard = false;
+          _nextPromptHideTimer?.cancel();
           needsSetState = true;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted && !_isDisposing && _showBecauseYouWatched) {
@@ -1497,10 +1757,45 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _showScreensaver = false;
       _recalcularHoraFin();
     });
+    _pauseSkipIntroHideTimer();
+    // Si estaba auto-oculto o dismissed, con controles puede volver a mostrarse
+    if (_introStartSec != null && _introEndSec != null) {
+      final pos = _currentPosition.inMilliseconds / 1000.0;
+      final inInterval = pos >= _introStartSec! && pos <= _introEndSec!;
+      if (inInterval && !_showSkipIntro) {
+        setState(() {
+          _showSkipIntro = true;
+          _skipIntroHideProgress = _skipIntroHideProgress > 0
+              ? _skipIntroHideProgress
+              : 1.0;
+        });
+      }
+    }
     _hideToolbarOnlyTimer?.cancel();
     _seekBarFocusNode.requestFocus();
     _scheduleHideControls();
     _resetScreensaverTimer();
+    _maybeReshowNextPromptOnControls();
+  }
+
+  /// El auto-hide lo gestiona NextEpisodePrompt (barra 10s). Aquí solo re-mostrar.
+  void _scheduleNextPromptAutoHide() {
+    // no-op: el widget tiene el timer interno
+  }
+
+  /// Al mostrar controles (o toolbar), si estamos en zona de outro y hay siguiente, re-mostrar.
+  void _maybeReshowNextPromptOnControls() {
+    if (!_hasRealNext || _showBecauseYouWatched) return;
+    // Solo bloquea si el usuario lo cerró a propósito (atrás / dismiss)
+    if (_nextPromptUserDismissed) return;
+    if (!_isNextTriggerReached()) return;
+    final remaining = _totalDuration - _currentPosition;
+    if (remaining <= const Duration(seconds: 2)) return;
+    // Al abrir controles: limpia autoHidden y re-muestra
+    setState(() {
+      _nextPromptAutoHidden = false;
+      _showNextEpisodeCard = true;
+    });
   }
 
   void _showToolbarOnlyNow() {
@@ -1518,6 +1813,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     target.requestFocus();
     _scheduleHideToolbarOnly();
     _resetScreensaverTimer();
+    _maybeReshowNextPromptOnControls();
   }
 
   void _scheduleHideToolbarOnly() {
@@ -1533,13 +1829,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _resetScreensaverTimer();
       return;
     }
+    // Nuvio: BACK con skip visible y sin controles → descartar skip
+    if (_showSkipIntro && !(_showControls || _showToolbarOnly)) {
+      _dismissSkipIntro();
+      return;
+    }
     if (_showBecauseYouWatched) {
-      setState(() => _showBecauseYouWatched = false);
+      setState(() {
+        _showBecauseYouWatched = false;
+        _showNextEpisodeCard = false;
+      });
       _videoFocusNode.requestFocus();
+      _scheduleHideControls();
       return;
     }
     if (_showNextEpisodeCard) {
-      setState(() => _showNextEpisodeCard = false);
+      _nextPromptHideTimer?.cancel();
+      setState(() {
+        _showNextEpisodeCard = false;
+        _nextPromptUserDismissed = true;
+      });
       _videoFocusNode.requestFocus();
       return;
     }
@@ -1562,6 +1871,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _showControls = false;
           _currentRow = 0;
         });
+        _resumeSkipIntroHideTimer();
+        _updateSkipIntroVisibility();
         _videoFocusNode.requestFocus();
       }
     } else {
@@ -1989,6 +2300,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _hasHandledEnd = false;
       _showEndPrompt = false;
       _showNextEpisodeCard = false;
+      _nextPromptUserDismissed = false;
+      _nextPreloaded = false;
+      _preloadTriggered = false;
     });
 
     try {
@@ -2063,6 +2377,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _silentPreloadNext() {
     try {
+      if (!_hasRealNext) return;
       if (widget.tipo == 'tv') {
         int season = widget.temporada ?? 1;
         int episode = (widget.capitulo ?? 0) + 1;
@@ -2088,6 +2403,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
             context: mounted ? context : null,
           );
         }
+      }
+      if (mounted && !_isDisposing) {
+        setState(() => _nextPreloaded = true);
+      } else {
+        _nextPreloaded = true;
       }
     } catch (_) {}
   }
@@ -2117,6 +2437,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _screensaverTimer?.cancel();
     _fitToastTimer?.cancel();
     _seekHoldTimer?.cancel();
+    _nextPromptHideTimer?.cancel();
+    _skipIntroHideTimer?.cancel();
   }
 
   Future<void> _navigateToPlayer({
@@ -2169,6 +2491,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _goNextEpisode() {
+    if (!_hasRealNext) return;
     if (widget.tipo == 'tv') {
       if (_siguiente == null) return;
       final s = (_siguiente!['temporada'] as num?)?.toInt();
@@ -2200,6 +2523,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _handleVideoEnded() {
     if (!mounted || _isDisposing) return;
     if (_showBecauseYouWatched) return;
+    if (!_hasRealNext) return;
     _goNextEpisode();
   }
 
@@ -2393,6 +2717,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return 'Castellano';
     }
     return 'Subtitulado';
+  }
+
+  double? _fracOfDuration(double? sec) {
+    if (sec == null || _totalDuration.inMilliseconds <= 0) return null;
+    return (sec * 1000 / _totalDuration.inMilliseconds).clamp(0.0, 1.0);
   }
 
   String _formatDuration(Duration d) {
@@ -2639,6 +2968,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _screensaverTimer?.cancel();
     _fitToastTimer?.cancel();
     _seekHoldTimer?.cancel();
+    _nextPromptHideTimer?.cancel();
+    _skipIntroHideTimer?.cancel();
     FocusManager.instance.removeListener(_onGlobalFocusChanged);
 
     // Si ya se liberó el controller en _navigateToPlayer, no volver a dispose.
@@ -2856,93 +3187,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
               if (!_isLoading &&
                   _errorMessage.isEmpty &&
-                  _showSkipIntro &&
                   !_showBecauseYouWatched)
                 Positioned(
                   right: 28,
                   bottom: (_showControls || _showToolbarOnly)
                       ? (_showSeasonsAndEpisodes ? 280.0 : 150.0)
                       : 48.0,
-                  child: Focus(
-                    focusNode: _skipIntroFocusNode,
-                    onKeyEvent: (node, event) {
-                      if (event is KeyDownEvent) {
-                        if (event.logicalKey == LogicalKeyboardKey.select ||
-                            event.logicalKey == LogicalKeyboardKey.enter) {
-                          _skipIntro();
-                          return KeyEventResult.handled;
-                        }
-                        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                          setState(() {
-                            _showControls = true;
-                            _currentRow = 1;
-                            _recalcularHoraFin();
-                          });
-                          _seekBarFocusNode.requestFocus();
-                          return KeyEventResult.handled;
-                        }
-                        if (_isBackKey(event)) {
-                          _handleBackPressed();
-                          return KeyEventResult.handled;
-                        }
-                      }
-                      return KeyEventResult.ignored;
-                    },
-                    child: Builder(
-                      builder: (context) {
-                        final hasFocus = Focus.of(context).hasFocus;
-                        return GestureDetector(
-                          onTap: _skipIntro,
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 180),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 12,
-                            ),
-                            decoration: BoxDecoration(
-                              color: hasFocus
-                                  ? Colors.white
-                                  : Colors.black.withValues(alpha: 0.72),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: hasFocus
-                                    ? Colors.white
-                                    : Colors.white.withValues(alpha: 0.55),
-                                width: 1.5,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.fast_forward_rounded,
-                                  size: 20,
-                                  color: hasFocus ? Colors.black : Colors.white,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Omitir intro',
-                                  style: TextStyle(
-                                    color: hasFocus
-                                        ? Colors.black
-                                        : Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
+                  child: _buildSkipIntroButton(),
                 ),
 
               if (!_isLoading &&
                   _errorMessage.isEmpty &&
-                  _showNextEpisodeCard &&
-                  (_siguiente != null || _recomendaciones.isNotEmpty) &&
+                  _hasRealNext &&
                   !_showBecauseYouWatched)
                 Positioned(
                   right: 28,
@@ -2956,12 +3212,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     countdownText: '',
                     isTv: widget.tipo == 'tv',
                     focusNode: _nextPromptFocusNode,
+                    visible: _showNextEpisodeCard,
+                    controlsVisible: _showControls || _showToolbarOnly,
+                    autoHideMs: 15000,
                     onPlay: _goNextEpisode,
                     onDismiss: () {
+                      final hadFocus = _nextPromptFocusNode.hasFocus;
                       setState(() {
                         _showNextEpisodeCard = false;
+                        _nextPromptUserDismissed = true;
+                        _nextPromptAutoHidden = false;
                       });
-                      _videoFocusNode.requestFocus();
+                      if (hadFocus) _releaseOverlayFocusToSafe();
+                    },
+                    onAutoHide: () {
+                      final hadFocus = _nextPromptFocusNode.hasFocus;
+                      setState(() {
+                        _showNextEpisodeCard = false;
+                        _nextPromptAutoHidden = true;
+                      });
+                      if (hadFocus) _releaseOverlayFocusToSafe();
                     },
                     onNavigateDown: () {
                       setState(() {
@@ -3001,7 +3271,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   continuarCreditosFocusNode: _byContinuarCreditosFocusNode,
                   isBackKey: _isBackKey,
                   onContinuarCreditos: () {
-                    setState(() => _showBecauseYouWatched = false);
+                    setState(() {
+                      _showBecauseYouWatched = false;
+                      _showNextEpisodeCard = false;
+                    });
                     _showControlsOverlayNow();
                   },
                   onProducirSiguiente: () {
@@ -3046,6 +3319,132 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ),
       ),
     ),
+    );
+  }
+
+  Widget _buildSkipIntroButton() {
+    // AnimatedVisibility estilo Nuvio: fade + scale
+    return AnimatedScale(
+      scale: _showSkipIntro ? 1.0 : 0.8,
+      duration: Duration(milliseconds: _showSkipIntro ? 300 : 200),
+      curve: Curves.easeOutCubic,
+      child: AnimatedOpacity(
+        opacity: _showSkipIntro ? 1.0 : 0.0,
+        duration: Duration(milliseconds: _showSkipIntro ? 300 : 200),
+        curve: Curves.easeOut,
+        child: IgnorePointer(
+          ignoring: !_showSkipIntro,
+          child: Focus(
+            focusNode: _skipIntroFocusNode,
+            onKeyEvent: (node, event) {
+              if (!_showSkipIntro) return KeyEventResult.ignored;
+              if (event is KeyDownEvent) {
+                if (event.logicalKey == LogicalKeyboardKey.select ||
+                    event.logicalKey == LogicalKeyboardKey.enter) {
+                  _skipIntro();
+                  return KeyEventResult.handled;
+                }
+                if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                  setState(() {
+                    _showControls = true;
+                    _currentRow = 1;
+                    _recalcularHoraFin();
+                  });
+                  _seekBarFocusNode.requestFocus();
+                  return KeyEventResult.handled;
+                }
+                if (event.logicalKey == LogicalKeyboardKey.arrowRight &&
+                    _showNextEpisodeCard) {
+                  _nextPromptFocusNode.requestFocus();
+                  return KeyEventResult.handled;
+                }
+                if (_isBackKey(event)) {
+                  _dismissSkipIntro();
+                  return KeyEventResult.handled;
+                }
+              }
+              return KeyEventResult.ignored;
+            },
+            child: Builder(
+              builder: (context) {
+                final hasFocus = Focus.of(context).hasFocus;
+                return GestureDetector(
+                  onTap: _skipIntro,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 168,
+                    decoration: BoxDecoration(
+                      color: hasFocus
+                          ? Colors.white
+                          : const Color(0xD91E1E1E),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: hasFocus
+                            ? Colors.white
+                            : Colors.white.withValues(alpha: 0.45),
+                        width: hasFocus ? 2 : 1.2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.35),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(14, 11, 14, 9),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.fast_forward_rounded,
+                                size: 20,
+                                color: hasFocus ? Colors.black : Colors.white,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Omitir intro',
+                                style: TextStyle(
+                                  color:
+                                      hasFocus ? Colors.black : Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Barra de auto-hide (10s) estilo Nuvio
+                        ClipRRect(
+                          borderRadius: const BorderRadius.only(
+                            bottomLeft: Radius.circular(7),
+                            bottomRight: Radius.circular(7),
+                          ),
+                          child: LinearProgressIndicator(
+                            value: _skipIntroHideProgress.clamp(0.0, 1.0),
+                            minHeight: 3,
+                            backgroundColor:
+                                Colors.white.withValues(alpha: 0.12),
+                            valueColor: AlwaysStoppedAnimation(
+                              hasFocus
+                                  ? accentOrange
+                                  : Colors.white.withValues(alpha: 0.7),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -3248,7 +3647,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             Icons.skip_next_rounded,
             widget.tipo == 'tv' ? 'Siguiente episodio' : 'Ver siguiente',
             _goNextEpisode,
-            highlight: true,
+            highlight: _nextPreloaded,
             iconOnly: true,
           ),
         const Spacer(),
@@ -3503,46 +3902,61 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Row(
                   children: [
-                    Text(
-                      _formatDuration(_currentPosition),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                    SizedBox(
+                      width: 52,
+                      child: Text(
+                        _formatDuration(_currentPosition),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                     Expanded(
                       child: SliderTheme(
                         data: SliderThemeData(
-                          trackHeight: 3.5,
+                          trackHeight: 4,
+                          trackShape: _SegmentedVideoTrackShape(
+                            introStart: _fracOfDuration(_introStartSec),
+                            introEnd: _fracOfDuration(_introEndSec),
+                            outroStart: _fracOfDuration(_outroStartSec),
+                            outroEnd: _fracOfDuration(_outroEndSec),
+                            recapStart: _fracOfDuration(_recapStartSec),
+                            recapEnd: _fracOfDuration(_recapEndSec),
+                            nextThreshold: _nextThresholdPct,
+                            activeColor: accentOrange,
+                            inactiveColor:
+                                Colors.white.withValues(alpha: 0.22),
+                            segmentColor: const Color(0xFF2ECC71),
+                          ),
                           thumbShape: RoundSliderThumbShape(
-                            enabledThumbRadius: _seekBarFocusNode.hasFocus
-                                ? 9
-                                : 6,
+                            enabledThumbRadius:
+                                _seekBarFocusNode.hasFocus ? 8 : 6,
                           ),
                           overlayShape: const RoundSliderOverlayShape(
                             overlayRadius: 14,
                           ),
                           activeTrackColor: accentOrange,
-                          inactiveTrackColor: Colors.white.withValues(
-                            alpha: 0.25,
-                          ),
+                          inactiveTrackColor:
+                              Colors.white.withValues(alpha: 0.22),
                           thumbColor: _seekBarFocusNode.hasFocus
                               ? Colors.white
                               : accentOrange,
-                          overlayColor: accentOrange.withValues(alpha: 0.25),
+                          overlayColor:
+                              accentOrange.withValues(alpha: 0.25),
                         ),
                         child: Slider(
                           value: _totalDuration.inSeconds > 0
                               ? _currentPosition.inSeconds
-                                    .clamp(0, _totalDuration.inSeconds)
-                                    .toDouble()
+                                  .clamp(0, _totalDuration.inSeconds)
+                                  .toDouble()
                               : 0.0,
                           max: _totalDuration.inSeconds > 0
                               ? _totalDuration.inSeconds.toDouble()
                               : 1.0,
-                          onChanged: (v) =>
-                              _controller.seekTo(Duration(seconds: v.toInt())),
+                          onChanged: (v) => _controller
+                              .seekTo(Duration(seconds: v.toInt())),
                           onChangeStart: (_) {
                             _hideControlsTimer?.cancel();
                             setState(() => _isDragging = true);
@@ -3557,12 +3971,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         ),
                       ),
                     ),
-                    Text(
-                      '-${_formatDuration(_totalDuration - _currentPosition)}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                    SizedBox(
+                      width: 58,
+                      child: Text(
+                        '-${_formatDuration(_totalDuration - _currentPosition)}',
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],

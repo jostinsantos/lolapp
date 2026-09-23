@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config_shared.dart';
+import 'tmdb_api_options.dart';
 class ContenidoSection {
   final VoidCallback refresh;
   
@@ -62,6 +63,7 @@ class ContenidoSection {
 
   List<Widget> build() {
     return [
+      const TmdbApiOptions(),
       _sectionHeader('GENERAL'),
       _buildToggleCard(
         title: 'Enriquecimiento TMDB',
@@ -117,11 +119,11 @@ class ContenidoSection {
         accent: const Color(0xFFEF4444),
       ),
       
-      _sectionHeader('IDIOMA DE METADATOS'),
+      _sectionHeader('IDIOMA DE METADATOS (solo uno)'),
       _buildToggleCard(
         title: 'Español Latino',
-        subtitleOn: 'Títulos y sinopsis en es-MX',
-        subtitleOff: 'Desactivado',
+        subtitleOn: 'API TMDB en es-MX (activo)',
+        subtitleOff: 'Toca para activar',
         enabled: spanishLatino,
         onChanged: (v) => _saveAndRefresh('spanish_latino', v),
         icon: Icons.language_rounded,
@@ -129,8 +131,8 @@ class ContenidoSection {
       ),
       _buildToggleCard(
         title: 'Español Castellano',
-        subtitleOn: 'Títulos y sinopsis en es-ES',
-        subtitleOff: 'Desactivado',
+        subtitleOn: 'API TMDB en es-ES (activo)',
+        subtitleOff: 'Toca para activar',
         enabled: spanishCastellano,
         onChanged: (v) => _saveAndRefresh('spanish_castellano', v),
         icon: Icons.language_rounded,
@@ -138,8 +140,8 @@ class ContenidoSection {
       ),
       _buildToggleCard(
         title: 'Inglés',
-        subtitleOn: 'Títulos y sinopsis en en-US',
-        subtitleOff: 'Desactivado',
+        subtitleOn: 'API TMDB en en-US (activo)',
+        subtitleOff: 'Toca para activar',
         enabled: english,
         onChanged: (v) => _saveAndRefresh('english', v),
         icon: Icons.language_rounded,

@@ -10,6 +10,10 @@ import 'presentation/mobile/mobile_shell.dart' as mobile;
 import 'presentation/tv/tv_shell.dart' as tv;
 import 'features/downloads/presentation/notification_helper.dart';
 import 'core/constants/versiones.dart'; // ← versiones centralizadas
+import 'supabase/supabase_config.dart';
+import 'supabase/supabase_client.dart';
+import 'features/profile/presentation/profile_selection_page.dart';
+
 
 const String kModeKey = 'app_mode'; // "mobile" | "tv"
 const String kDisclaimerKey = 'disclaimer_accepted';
@@ -115,10 +119,11 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
-    _goToHome();
+    await _goToHome();
   }
 
   void _focusAfterFrame(FocusNode node) {
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) node.requestFocus();
     });
@@ -152,15 +157,45 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> _acceptDisclaimer() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(kDisclaimerKey, true);
-    _goToHome();
+    await _goToHome();
   }
+
 
   void _rejectDisclaimer() {
     SystemNavigator.pop();
   }
 
-  void _goToHome() {
+  Future<void> _goToHome() async {
     if (!mounted) return;
+
+    // Solo si Supabase está configurado (URL+KEY guardados) y aún no hay perfil:
+    // mostrar selección de perfiles. Si está desactivado → main normal (cache).
+    final hasCreds = await SupabaseConfig.hasCredentials();
+    final loggedIn = await SupabaseConfig.isLoggedIn();
+    final askEvery = await SupabaseConfig.getAskProfileEveryLaunch();
+
+    // Pedir perfil si: (hay creds y no hay sesión) O (activo y "pedir cada vez")
+    final needProfile = hasCreds && (!loggedIn || askEvery);
+
+    if (needProfile) {
+      final ok = await AppSupabase.init();
+      if (!mounted) return;
+      // Si no se pudo inicializar, no bloquear: ir al home normal
+      if (ok) {
+        // ProfileSelectionPage navega sola al home (pushAndRemoveUntil)
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const ProfileSelectionPage(),
+            transitionDuration: const Duration(milliseconds: 350),
+            transitionsBuilder: (_, animation, __, child) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+          ),
+        );
+        return;
+      }
+    }
+
     final mode = _mode ?? 'mobile';
     final Widget home =
         mode == 'tv' ? const tv.MainHome() : const mobile.MainHome();
@@ -175,6 +210,7 @@ class _SplashScreenState extends State<SplashScreen> {
       ),
     );
   }
+
 
   // ── UI ─────────────────────────────────────────────────────────────────
 

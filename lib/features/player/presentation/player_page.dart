@@ -1,4 +1,3 @@
-// player mobil
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -15,6 +14,7 @@ import 'subtitles/subtitle_widget.dart';
 import 'quality/quality_selector.dart';
 import 'subtitles/subtitle_selector.dart'; // ← NUEVO
 import 'widgets/cast_button.dart'; // ← CAST
+import 'widgets/mobile_skip_next_overlay.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_player_api.dart';
 import 'player_controller.dart'; // Módulo independiente de servidores / HLS
 
@@ -142,6 +142,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double? _introStartSec;
   double? _introEndSec;
   bool _showSkipIntro = false;
+  bool _skipIntroDismissed = false;
+  bool _skipIntroAutoHidden = false;
+  bool _nextPromptUserDismissed = false;
+  bool _nextPromptAutoHidden = false;
 
   // ─── Video Fit ──────────────────────────────────────────────────────────
   _VideoFitMode _fitMode = _VideoFitMode.contain;
@@ -451,9 +455,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
     final pos = _currentPosition.inMilliseconds / 1000.0;
-    final visible = pos >= _introStartSec! && pos <= _introEndSec!;
+    final inInterval = pos >= _introStartSec! && pos <= _introEndSec!;
+    final visible = inInterval &&
+        !_skipIntroDismissed &&
+        !(_skipIntroAutoHidden && !_showControls);
     if (visible != _showSkipIntro) {
       _showSkipIntro = visible;
+      if (!inInterval) {
+        _skipIntroDismissed = false;
+        _skipIntroAutoHidden = false;
+      }
     }
   }
 
@@ -461,8 +472,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_introEndSec == null || !_controllerReady) return;
     final target = Duration(milliseconds: (_introEndSec! * 1000).round());
     _controller.seekTo(target);
-    setState(() => _showSkipIntro = false);
+    setState(() {
+      _showSkipIntro = false;
+      _skipIntroDismissed = true;
+      _skipIntroAutoHidden = false;
+    });
     _scheduleHideControls();
+  }
+
+  void _maybeReshowPrompts() {
+    // Skip intro: solo si auto-ocultó (no dismiss manual)
+    if (_introStartSec != null &&
+        _introEndSec != null &&
+        !_skipIntroDismissed) {
+      final pos = _currentPosition.inMilliseconds / 1000.0;
+      if (pos >= _introStartSec! && pos <= _introEndSec!) {
+        _skipIntroAutoHidden = false;
+        _showSkipIntro = true;
+      }
+    }
+    // Next: solo al abrir controles; limpia autoHidden
+    if (!_nextPromptUserDismissed &&
+        _showEndPrompt &&
+        (_siguiente != null || _recomendaciones.isNotEmpty)) {
+      _nextPromptAutoHidden = false;
+      _showNextButton = true;
+    }
   }
 
   void _seekBy(int seconds) {
@@ -1005,8 +1040,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
             (remaining <= const Duration(minutes: 3) &&
                 remaining > const Duration(seconds: 2));
 
-        if (nearEnd != _showNextButton) {
-          _showNextButton = nearEnd;
+        final shouldShowNext = nearEnd &&
+            remaining > const Duration(seconds: 2) &&
+            (_siguiente != null || _recomendaciones.isNotEmpty) &&
+            !_nextPromptUserDismissed &&
+            !(_nextPromptAutoHidden && !_showControls);
+
+        if (shouldShowNext != _showNextButton) {
+          _showNextButton = shouldShowNext;
           needsSetState = true;
         }
 
@@ -1568,96 +1609,66 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 maxWidth: 640,
                 verticalOffset: _subtitleVerticalOffset,
               ),
-            if (!_isLoading && _errorMessage.isEmpty && _showSkipIntro)
+            // ── Omitir intro (estilo Nuvio) ──────────────────────────
+            if (!_isLoading && _errorMessage.isEmpty)
               Positioned(
                 right: 16,
                 bottom: _showControls
                     ? (_showBottomPanel ? 200.0 : 110.0)
                     : 40.0,
-                child: GestureDetector(
+                child: MobileSkipNextButton(
+                  visible: _showSkipIntro,
+                  controlsVisible: _showControls,
+                  label: 'Omitir intro',
+                  icon: Icons.fast_forward_rounded,
+                  accentColor: accentOrange,
+                  primary: false,
+                  autoHideMs: 15000,
                   onTap: _skipIntro,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.75),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.white54),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.fast_forward_rounded,
-                          size: 18,
-                          color: Colors.white,
-                        ),
-                        SizedBox(width: 6),
-                        Text(
-                          'Omitir intro',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  onAutoHide: () {
+                    setState(() {
+                      _skipIntroAutoHidden = true;
+                      _showSkipIntro = false;
+                    });
+                  },
                 ),
               ),
+
+            // ── Siguiente episodio / contenido (estilo Nuvio) ─────────
             if (!_isLoading &&
                 _errorMessage.isEmpty &&
-                _showNextButton &&
                 (_siguiente != null || _recomendaciones.isNotEmpty))
               Positioned(
                 right: 16,
                 bottom: _showControls
                     ? (_showBottomPanel ? 200.0 : 110.0)
                     : 40.0,
-                child: GestureDetector(
-                  onTap: _goNextEpisode,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: accentOrange,
-                      borderRadius: BorderRadius.circular(10),
-                      boxShadow: [
-                        BoxShadow(
-                          color: accentOrange.withValues(alpha: 0.4),
-                          blurRadius: 12,
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _mediaType == 'tv'
-                              ? 'Siguiente episodio'
-                              : 'Siguiente',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        const Icon(
-                          Icons.skip_next_rounded,
-                          color: Colors.white,
-                          size: 22,
-                        ),
-                      ],
-                    ),
-                  ),
+                child: MobileSkipNextButton(
+                  visible: _showNextButton,
+                  controlsVisible: _showControls,
+                  label: _mediaType == 'tv'
+                      ? 'Siguiente episodio'
+                      : 'Siguiente',
+                  icon: Icons.skip_next_rounded,
+                  accentColor: accentOrange,
+                  primary: true,
+                  autoHideMs: 15000,
+                  onTap: () {
+                    setState(() {
+                      _nextPromptUserDismissed = true;
+                      _nextPromptAutoHidden = false;
+                    });
+                    _goNextEpisode();
+                  },
+                  onAutoHide: () {
+                    setState(() {
+                      _showNextButton = false;
+                      _nextPromptAutoHidden = true;
+                    });
+                  },
                 ),
               ),
+
             if (!_isLoading && _errorMessage.isEmpty && _showControls)
               _buildControlsOverlay(),
           ],
@@ -1814,31 +1825,51 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           const SizedBox(width: 10),
                         ],
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (_capituloFmt != null)
-                                Text(
-                                  '$_capituloFmt${_tituloCapitulo != null ? ' · $_tituloCapitulo' : ''}',
-                                  style: TextStyle(
-                                    color: Colors.grey[400],
-                                    fontSize: 12,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              Text(
-                                _tituloContenido,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
+                          child: _mediaType == 'tv'
+                              ? Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    if (_capituloFmt != null &&
+                                        _capituloFmt!.isNotEmpty)
+                                      Text(
+                                        _capituloFmt!,
+                                        style: TextStyle(
+                                          color: Colors.grey[400],
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    Text(
+                                      (_tituloCapitulo != null &&
+                                              _tituloCapitulo!.isNotEmpty)
+                                          ? _tituloCapitulo!
+                                          : _tituloContenido,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                )
+                              // Película: solo logo; si no hay logo → título
+                              : (_logoUrl == null || _logoUrl!.isEmpty)
+                                  ? Text(
+                                      _tituloContenido,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    )
+                                  : const SizedBox.shrink(),
                         ),
                       ],
                     ),

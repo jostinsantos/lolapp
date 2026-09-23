@@ -1,18 +1,88 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:dart_cast/dart_cast.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-/// Botón Cast (Chromecast / Google TV / Android TV).
-///
-/// Uso:
-/// ```dart
-/// CastButton(
-///   videoUrl: _activeUrl,
-///   headers: _playerHeaders(),
-///   title: _tituloContenido,
-///   accentColor: accentOrange,
-/// )
-/// ```
+// =============================================================================
+// CastManager – mantiene la sesión viva aunque salgas del reproductor
+// =============================================================================
+
+class CastManager {
+  static final CastManager _instance = CastManager._();
+  factory CastManager() => _instance;
+  CastManager._();
+
+  CastService? _castService;
+  CastSession? _session;
+  bool _isConnected = false;
+
+  final FlutterLocalNotificationsPlugin _notif =
+      FlutterLocalNotificationsPlugin();
+  static const int _notifId = 9999;
+
+  bool get isConnected => _isConnected;
+  CastSession? get session => _session;
+
+  Future<void> connect(
+    CastService service,
+    CastSession session,
+    String title,
+  ) async {
+    // Cerrar sesión anterior si existía
+    await disconnect(showNotif: false);
+
+    _castService = service;
+    _session = session;
+    _isConnected = true;
+
+    await _showCastNotification(title);
+  }
+
+  Future<void> disconnect({bool showNotif = true}) async {
+    try {
+      await _session?.stop();
+      await _session?.disconnect();
+    } catch (_) {}
+
+    try {
+      _castService?.dispose();
+    } catch (_) {}
+
+    _session = null;
+    _castService = null;
+    _isConnected = false;
+
+    if (showNotif) {
+      await _notif.cancel(_notifId);
+    }
+  }
+
+  Future<void> _showCastNotification(String title) async {
+    const androidDetails = AndroidNotificationDetails(
+      'cast_channel',
+      'Cast en curso',
+      channelDescription: 'Notificación mientras se transmite a la TV',
+      importance: Importance.low,
+      priority: Priority.low,
+      ongoing: true, // no se puede deslizar
+      autoCancel: false,
+      showWhen: false,
+      category: AndroidNotificationCategory.service,
+    );
+
+    await _notif.show(
+      _notifId,
+      'Transmitiendo a TV',
+      title.isNotEmpty ? title : 'Reproduciendo en Chromecast / TV',
+      const NotificationDetails(android: androidDetails),
+    );
+  }
+}
+
+// =============================================================================
+// Botón Cast
+// =============================================================================
+
 class CastButton extends StatefulWidget {
   final String videoUrl;
   final Map<String, String> headers;
@@ -36,15 +106,14 @@ class CastButton extends StatefulWidget {
 }
 
 class _CastButtonState extends State<CastButton> {
-  CastService? _castService;
-  CastSession? _session;
-  bool _isConnected = false;
   bool _isConnecting = false;
+
+  bool get _isConnected => CastManager().isConnected;
 
   @override
   void dispose() {
-    _session?.disconnect();
-    _castService?.dispose();
+    // IMPORTANTE: ya NO desconectamos aquí.
+    // El Cast sigue vivo aunque salgas del reproductor.
     super.dispose();
   }
 
@@ -61,7 +130,7 @@ class _CastButtonState extends State<CastButton> {
       return;
     }
 
-    if (_isConnected && _session != null) {
+    if (_isConnected) {
       await _showConnectedModal();
       return;
     }
@@ -78,13 +147,11 @@ class _CastButtonState extends State<CastButton> {
         videoUrl: widget.videoUrl,
         headers: widget.headers,
         title: widget.title,
-        onConnected: (service, session) {
-          setState(() {
-            _castService = service;
-            _session = session;
-            _isConnected = true;
-            _isConnecting = false;
-          });
+        onConnected: (service, session) async {
+          await CastManager().connect(service, session, widget.title);
+          if (mounted) {
+            setState(() => _isConnecting = false);
+          }
           widget.onCastStarted?.call();
         },
         onError: (msg) {
@@ -102,24 +169,19 @@ class _CastButtonState extends State<CastButton> {
   }
 
   Future<void> _showConnectedModal() async {
+    final session = CastManager().session;
+    if (session == null) return;
+
     await showDialog(
       context: context,
       barrierColor: Colors.black87,
       builder: (ctx) => _CastControlsDialog(
-        session: _session!,
+        session: session,
         accentColor: widget.accentColor,
         title: widget.title,
         onDisconnect: () async {
-          await _session?.stop();
-          await _session?.disconnect();
-          _castService?.dispose();
-          if (mounted) {
-            setState(() {
-              _session = null;
-              _castService = null;
-              _isConnected = false;
-            });
-          }
+          await CastManager().disconnect();
+          if (mounted) setState(() {});
           widget.onCastStopped?.call();
           if (ctx.mounted) Navigator.pop(ctx);
         },
@@ -268,6 +330,7 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
   @override
   void dispose() {
     _discoverySub?.cancel();
+    // NO hacemos dispose del CastService aquí porque lo gestiona CastManager
     super.dispose();
   }
 
@@ -549,7 +612,7 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
 }
 
 // =============================================================================
-// Modal: controles con sesion activa
+// Modal: controles con sesión activa
 // =============================================================================
 
 class _CastControlsDialog extends StatefulWidget {

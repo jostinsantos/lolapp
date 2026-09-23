@@ -11,6 +11,8 @@ import '../../player/presentation/player_page.dart';
 // Ajusta estas rutas a tu estructura
 import '../../downloads/presentation/download_manager.dart';
 import '../../downloads/presentation/extractor_download_page.dart';
+import '../../../supabase/guardados_service.dart';
+
 const kAccentColor = Color(0xFFE50914);
 const kPurpleSeason = Color(0xFFC026FF);
 const kOrangeVer = Color(0xFFFF6B00);
@@ -23,45 +25,22 @@ class GuardadosBus {
 }
 
 class GuardadosCache {
-  static const String _kKey = 'guardados_items';
-
+  /// Delega a GuardadosService (Supabase si hay usuario logueado, cache local si no).
   static Future<List<Map<String, dynamic>>> getAll() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList(_kKey) ?? [];
-    return raw
-        .map((e) {
-          try {
-            return Map<String, dynamic>.from(jsonDecode(e));
-          } catch (_) {
-            return <String, dynamic>{};
-          }
-        })
-        .where((m) => m.isNotEmpty)
-        .toList();
+    return GuardadosService.getAll();
   }
 
   static Future<bool> isSaved(int idcontenido) async {
-    final items = await getAll();
-    return items.any((e) => e['idcontenido'] == idcontenido);
+    return GuardadosService.isSaved(idcontenido);
   }
 
   static Future<bool> toggle(Map<String, dynamic> item) async {
-    final prefs = await SharedPreferences.getInstance();
-    final items = await getAll();
-    final id = item['idcontenido'];
-    final exists = items.any((e) => e['idcontenido'] == id);
-
-    if (exists) {
-      items.removeWhere((e) => e['idcontenido'] == id);
-    } else {
-      items.insert(0, item);
-    }
-
-    await prefs.setStringList(_kKey, items.map((e) => jsonEncode(e)).toList());
+    final result = await GuardadosService.toggle(item);
     GuardadosBus.bump();
-    return !exists;
+    return result;
   }
 }
+
 
 class PageContenido extends StatefulWidget {
   final int idcontenido;
@@ -347,6 +326,7 @@ class _PageContenidoState extends State<PageContenido>
         .toString()
         .toLowerCase();
 
+    final posterUrl = _firstUrl(data['poster_path']);
     final item = <String, dynamic>{
       'idcontenido': _resolvedTmdbId,
       'tmdb_id': _resolvedTmdbId,
@@ -355,7 +335,9 @@ class _PageContenidoState extends State<PageContenido>
       'type': tipo,
       'media_type': tipo,
       'title': data['title'] ?? data['titulo_contenido'] ?? '',
-      'poster_path': _firstUrl(data['poster_path']),
+      'titulo': data['title'] ?? data['titulo_contenido'] ?? '',
+      'poster': posterUrl,
+      'poster_path': posterUrl,
       'backdrop_path': _firstUrl(data['backdrop_path']),
       'logo_path': _firstUrl(data['logo_path']),
       'vote_average': data['vote_average'],

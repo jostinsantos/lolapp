@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/constants/tmdb_apis.dart';
 
 /// Servicio de búsqueda alimentado por la API de TMDB.
 /// Respeta las preferencias de ConfigPage (SharedPreferences),
@@ -13,7 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///
 /// API key: a2d9bbed370d9f678e34006f8750a5a5
 class TmdbSearchService {
-  static const String _apiKey = 'a2d9bbed370d9f678e34006f8750a5a5';
+  static const String _apiKeyFallback = 'a2d9bbed370d9f678e34006f8750a5a5'; // unused fallback
   static const String _base = 'https://api.themoviedb.org/3';
   static const String _imgBase = 'https://image.tmdb.org/t/p';
 
@@ -51,11 +52,8 @@ class TmdbSearchService {
     );
   }
 
-  String _apiLanguage(_SearchPrefs prefs) {
-    if (prefs.spanishLatino) return 'es-MX';
-    if (prefs.spanishCastellano) return 'es-ES';
-    if (prefs.english) return 'en-US';
-    return 'es-MX';
+  Future<String> _apiLanguage([dynamic _]) async {
+    return TmdbApis.getLanguage();
   }
 
   // ── API helpers ───────────────────────────────────────────────────────────
@@ -66,7 +64,7 @@ class TmdbSearchService {
     required String language,
   }) async {
     final q = <String, String>{
-      'api_key': _apiKey,
+      'api_key': await TmdbApis.getApiKey(),
       'language': language,
       ...?query,
     };
@@ -285,7 +283,7 @@ class TmdbSearchService {
     }
 
     final prefs = await _loadPrefs();
-    final preferredLang = _apiLanguage(prefs);
+    final preferredLang = await _apiLanguage(prefs);
 
     // Idiomas en los que buscamos (títulos originales + ES + EN)
     final languagesToSearch = <String>{

@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../supabase/supabase_config.dart';
+import 'profile_selection_page.dart';
+
 const _kAccentColor = Color(0xFFE50914);
 const _kBgColor = Colors.black;
 
@@ -34,6 +37,9 @@ class PerfilPageState extends State<PerfilPage>
   String _deviceOs = '';
   String _deviceVersion = '';
   String _screenInfo = '';
+
+  bool _supabaseActive = false;
+  String? _supabaseUserName;
 
   // 0-2 stats, 3 dispositivo — fijos, nunca se recrean
   late final List<FocusNode> _nodes;
@@ -72,6 +78,10 @@ class PerfilPageState extends State<PerfilPage>
     if (!mounted) return;
     final device = _readDeviceInfo();
 
+    final supabaseActive = await SupabaseConfig.isSupabaseActive();
+    final supabaseName = await SupabaseConfig.getCurrentUserName();
+
+    if (!mounted) return;
     setState(() {
       _totalSeconds = stats.totalSeconds;
       _moviesWatched = stats.movies;
@@ -80,6 +90,8 @@ class PerfilPageState extends State<PerfilPage>
       _deviceOs = device.os;
       _deviceVersion = device.version;
       _screenInfo = device.screen;
+      _supabaseActive = supabaseActive;
+      _supabaseUserName = supabaseName;
       _loading = false;
     });
 
@@ -233,6 +245,79 @@ class PerfilPageState extends State<PerfilPage>
           physics: const BouncingScrollPhysics(),
           slivers: [
             const SliverToBoxAdapter(child: SizedBox(height: 80)),
+
+            if (_supabaseActive)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(40, 0, 40, 16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1a1a2e),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: _kAccentColor.withOpacity(0.4)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.cloud_done_rounded,
+                                  color: _kAccentColor, size: 22),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Supabase activo',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    Text(
+                                      _supabaseUserName ?? 'Perfil',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: () async {
+                                  await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => ProfileSelectionPage(
+                                        allowDismiss: true,
+                                        onProfileSelected: () {
+                                          Navigator.of(context).pop();
+                                          refresh();
+                                        },
+                                      ),
+                                    ),
+                                  );
+                                  refresh();
+                                },
+                                child: const Text(
+                                  'Cambiar perfil',
+                                  style: TextStyle(color: _kAccentColor),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
 
             SliverToBoxAdapter(
               key: _statsKey,
