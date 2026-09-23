@@ -18,6 +18,25 @@ import 'widgets/mobile_skip_next_overlay.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_player_api.dart';
 import 'player_controller.dart'; // Módulo independiente de servidores / HLS
 
+/// Regla de gestión inteligente de subtítulos.
+///
+/// Devuelve `true` cuando el audio del servidor está en español
+/// (`latino`, `castellano`, `es`, `es_mx`, `es_es`…); en ese caso los
+/// subtítulos se inicializan **desactivados**. Para cualquier otro idioma
+/// (`en`, `ja`, `vo`…) se inicializan **activados**.
+///
+/// Se aplica en `initState()` y al hacer hot-swap de servidor
+/// (ver `_switchServer`). Se declara a nivel de librería para poder
+/// cubrirla con pruebas unitarias.
+bool esAudioEnEspanol(String? codigoIdioma) {
+  final c = (codigoIdioma ?? '').toLowerCase().trim();
+  if (c.isEmpty) return false;
+  if (c.contains('latino') || c.contains('castellano')) return true;
+  if (c == 'es' || c == 'es_mx' || c == 'es_es') return true;
+  // Prefijos `es_*` / `es-*`; evita falsos positivos tipo "ingles".
+  return c.startsWith('es_') || c.startsWith('es-');
+}
+
 class _SubtitleCue {
   final Duration start;
   final Duration end;
@@ -76,6 +95,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   late VideoPlayerController _controller;
   bool _isLoading = true;
+
+  /// Activo durante el hot-swap de servidor (`_switchServer`): mantiene
+  /// visible el spinner central sin ocultar los controles.
+  bool _isSwitchingServer = false;
+
+  /// Si el video estaba reproduciéndose antes de abrir el modal de servidores.
+  bool _wasPlayingBeforeModal = false;
+
   bool _isPlaying = false;
   bool _subtitlesEnabled = true;
   Duration _currentPosition = Duration.zero;
@@ -260,6 +287,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (widget.idioma != null && widget.idioma!.isNotEmpty) {
       _idioma = widget.idioma!.toUpperCase();
     }
+    // Subtítulos: activos solo si el audio del servidor NO está en español
+    _subtitlesEnabled = !esAudioEnEspanol(_idioma);
     _setupSystemUi();
     // Reaplica landscape tras el dispose del player anterior (pushReplacement)
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -753,6 +782,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   // ─── Subtítulos originales (fallback) ───────────────────────────────────
+  /// Descarga y parsea las pistas VTT/OpenSubtitles en segundo plano.
+  ///
+  /// Nunca fuerza `_subtitlesEnabled = true`: si los subtítulos están
+  /// desactivados (por la regla de idioma o por el usuario) se quedan
+  /// desactivados; solo se cachean las pistas para usarlas después.
   Future<void> _loadSubtitles() async {
     try {
       final fromApi = _apiData?['subtitulo']?.toString();
@@ -763,7 +797,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
         final cues = _parseVtt(utf8.decode(response.bodyBytes));
-        if (mounted && !_isDisposing) setState(() => _subtitleCues = cues);
+        if (mounted && !_isDisposing) {
+          setState(() {
+            _subtitleCues = cues;
+            if (!_subtitlesEnabled) _currentSubtitleText = '';
+          });
+        }
       }
     } catch (_) {}
   }
@@ -837,7 +876,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   // ─── Cargar subtítulo desde OpenSubtitles ───────────────────────────────
-  Future<void> _loadSelectedSubtitle(Map<String, dynamic> sub) async {
+  /// [habilitar] es `false` en restauraciones automáticas (prefs) para no
+  /// forzar `_subtitlesEnabled = true` si la regla de idioma lo apagó.
+  Future<void> _loadSelectedSubtitle(
+    Map<String, dynamic> sub, {
+    bool habilitar = true,
+  }) async {
     final url = sub['url']?.toString();
     final id = sub['id']?.toString() ?? '';
     final lang = (sub['lang'] ?? '').toString().toLowerCase();
@@ -859,7 +903,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (mounted && !_isDisposing) {
         setState(() {
           _subtitleCues = cues;
-          _subtitlesEnabled = true;
+          if (habilitar) _subtitlesEnabled = true;
           _selectedSubtitleId = finalId;
           _selectedSubtitleLabel = lang.isNotEmpty
               ? lang.toUpperCase()
@@ -903,12 +947,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
       });
       if (savedUrl != null && savedUrl.isNotEmpty) {
-        await _loadSelectedSubtitle({
-          'url': savedUrl,
-          'id': savedId ?? '',
-          'lang': savedLang ?? '',
-          'subtitleFileName': 'cached.vtt',
-        });
+        // Restauración en segundo plano: no fuerza la reactivación
+        await _loadSelectedSubtitle(
+          {
+            'url': savedUrl,
+            'id': savedId ?? '',
+            'lang': savedLang ?? '',
+            'subtitleFileName': 'cached.vtt',
+          },
+          habilitar: false,
+        );
       }
     } catch (e) {
       debugPrint('Error cargando prefs subtítulos: $e');
@@ -1151,13 +1199,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _hideControlsTimer?.cancel();
     await _saveCache();
 
-    final wasPlaying = _isPlaying;
+    _wasPlayingBeforeModal = _isPlaying;
     if (_isPlaying) _controller.pause();
 
     final id = idcontenido ?? _resolvedId;
     final media = tipo ?? _mediaType;
 
-    await showDialog(
+    // Con `fromPlayer: true` el modal devuelve el servidor elegido en lugar
+    // de navegar por su cuenta (hot-swap ver servers_modal.dart).
+    final nuevoServidor = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (_) => ServidoresModal(
         idcontenido: id,
@@ -1173,10 +1223,133 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ),
     );
 
-    if (mounted && !_isDisposing && wasPlaying) {
+    if (!mounted || _isDisposing) return;
+
+    // Servidor nuevo → cambiar en caliente sin salir del reproductor
+    if (nuevoServidor != null && nuevoServidor.isNotEmpty) {
+      await _switchServer(nuevoServidor);
+      return;
+    }
+
+    // Modal cerrado sin selección → reanudar como estaba
+    if (_wasPlayingBeforeModal && _controllerReady) {
       _controller.play();
       _scheduleHideControls();
     }
+    _wasPlayingBeforeModal = false;
+  }
+
+  /// Cambia de servidor en caliente (hot-swap) sin salir del reproductor.
+  ///
+  /// [nuevoServidor] es el mapa devuelto por [ServidoresModal] cuando se abre
+  /// con `fromPlayer: true`. Resuelve la nueva URL, re-inicializa el
+  /// controlador y re-evalúa la regla de subtítulos para el idioma del audio
+  /// de la nueva fuente, manteniendo los controles visibles e interactivos
+  /// (spinner central) mediante [_isSwitchingServer].
+  Future<void> _switchServer(Map<String, dynamic> nuevoServidor) async {
+    if (_isSwitchingServer || _isDisposing || !mounted) return;
+
+    _hideControlsTimer?.cancel();
+    await _saveCache();
+    if (!mounted || _isDisposing) return;
+
+    final reanudarAlFallar = _wasPlayingBeforeModal;
+    _wasPlayingBeforeModal = false;
+
+    // Evitar carreras con la resolución inicial de servidores
+    var esperaMs = 0;
+    while (_isResolving && esperaMs < 15000) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      esperaMs += 100;
+      if (!mounted || _isDisposing) return;
+    }
+
+    setState(() {
+      _isSwitchingServer = true;
+      _showControls = true;
+    });
+
+    // 1) Resolver la URL reproducible (m3u8 vigente, directa o vía extractor)
+    PlayableSource? playable;
+    try {
+      playable = await _serverLoader.tryResolveServer(
+        nuevoServidor,
+        context: mounted ? context : null,
+      );
+    } catch (e) {
+      debugPrint('Error resolviendo servidor seleccionado: $e');
+    }
+
+    if (!mounted || _isDisposing) return;
+
+    if (playable == null || playable.url.isEmpty) {
+      // Sin URL reproducible: conservar el servidor actual.
+      setState(() => _isSwitchingServer = false);
+      if (reanudarAlFallar && _controllerReady) _controller.play();
+      _scheduleHideControls();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo cambiar a ese servidor'),
+            backgroundColor: Color(0xFF1A1A1A),
+          ),
+        );
+      }
+      return;
+    }
+
+    final nuevaUrl = playable.url;
+    final headers = <String, String>{
+      if (widget.headers != null) ...widget.headers!,
+      ...playable.headers,
+    };
+
+    // 2) Re-inicializar el controlador con la nueva fuente
+    setState(() {
+      _isSwitchingServer = true;
+      _isLoading = true;
+      _errorMessage = '';
+      _allServersFailed = false;
+      _showControls = true;
+      _hasHandledEnd = false;
+      _showEndPrompt = false;
+      _showNextButton = false;
+      _currentQualityLabel = 'Auto';
+      _currentQualityUrl = null;
+
+      // Idioma de la nueva fuente → re-evaluar la regla de subtítulos
+      final nuevoIdioma = nuevoServidor['idioma']?.toString();
+      if (nuevoIdioma != null && nuevoIdioma.isNotEmpty) {
+        _idioma = nuevoIdioma.toUpperCase();
+      }
+      _subtitlesEnabled = !esAudioEnEspanol(_idioma);
+      _subtitleCues = const [];
+      _currentSubtitleText = '';
+      _selectedSubtitleId = null;
+      _selectedSubtitleLabel = 'Subs';
+
+      // El fallback automático continúa desde el servidor elegido
+      final idx = _fallbackServers.indexWhere(
+        (s) =>
+            (s['resolved_m3u8']?.toString() ??
+                    s['servidor_url']?.toString() ??
+                    '') ==
+            nuevaUrl,
+      );
+      _fallbackIndex = idx >= 0 ? idx : 0;
+    });
+
+    try {
+      await _startControllerWithUrl(nuevaUrl, headers);
+    } finally {
+      if (mounted && !_isDisposing) {
+        setState(() => _isSwitchingServer = false);
+      }
+    }
+
+    // Cargar las pistas VTT de la nueva fuente en segundo plano:
+    // no fuerza `_subtitlesEnabled` (respeta la regla aplicada arriba).
+    if (mounted && !_isDisposing) _loadSubtitles();
   }
 
   void _openInfoModal() {
@@ -1573,7 +1746,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           fit: StackFit.expand,
           children: [
             if (_isLoading)
-              _buildLoadingScreen()
+              _buildLoadingBackdrop()
             else if (_errorMessage.isNotEmpty)
               _buildErrorScreen()
             else
@@ -1587,7 +1760,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                 ),
               ),
-            if (_isBuffering && !_isLoading && _errorMessage.isEmpty)
+            // Spinner central durante carga o hot-swap de servidor: los
+            // controles permanecen visibles e interactivos en lugar de
+            // ocultar completamente la UI.
+            if (_isLoading || _isSwitchingServer)
+              const Center(
+                child: SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: CircularProgressIndicator(
+                    color: accentOrange,
+                    strokeWidth: 3.5,
+                  ),
+                ),
+              ),
+            if (_isBuffering &&
+                !_isLoading &&
+                !_isSwitchingServer &&
+                _errorMessage.isEmpty)
               const Center(
                 child: CircularProgressIndicator(
                   color: accentOrange,
@@ -1669,7 +1859,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               ),
 
-            if (!_isLoading && _errorMessage.isEmpty && _showControls)
+            // Controles persistentes: también visibles durante la carga
+            if (_errorMessage.isEmpty && _showControls)
               _buildControlsOverlay(),
           ],
         ),
@@ -1677,7 +1868,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _buildLoadingScreen() {
+  /// Fondo (backdrop + scrim) mientras carga; el spinner va en una capa
+  /// propia del [Stack] principal para no tapar los controles.
+  Widget _buildLoadingBackdrop() {
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -1689,16 +1882,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
             errorWidget: (_, __, ___) => const ColoredBox(color: Colors.black),
           ),
         ColoredBox(color: Colors.black.withValues(alpha: 0.55)),
-        const Center(
-          child: SizedBox(
-            width: 44,
-            height: 44,
-            child: CircularProgressIndicator(
-              color: accentOrange,
-              strokeWidth: 3.5,
-            ),
-          ),
-        ),
       ],
     );
   }
@@ -1978,7 +2161,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           setState(() {
                             _currentPosition = Duration(seconds: v.toInt());
                           });
-                          _controller.seekTo(Duration(seconds: v.toInt()));
+                          // Sin controller aún (carga inicial): solo UI
+                          if (_controllerReady) {
+                            _controller.seekTo(Duration(seconds: v.toInt()));
+                          }
                         },
                         onChangeStart: (_) {
                           _hideControlsTimer?.cancel();

@@ -847,6 +847,18 @@ class _ServidoresModalState extends State<ServidoresModal>
 
     final nav = Navigator.of(context);
 
+    // ── HOT-SWAP: abierto desde el player → devolver el servidor ─────────
+    // El player captura el resultado del dialog con
+    // `Navigator.of(context).pop(servidorSeleccionado)` y cambia de fuente
+    // en caliente, sin destruir la ruta actual con push/pushReplacement.
+    if (widget.fromPlayer && !widget.forDownload) {
+      _schedulePreload();
+      final seleccionado = Map<String, dynamic>.from(servidor);
+      if (m3u8.isNotEmpty) seleccionado['resolved_m3u8'] = m3u8;
+      nav.pop(seleccionado);
+      return;
+    }
+
     // ── Descarga: siempre al ExtractorDownloadPage ────────────────────
     if (widget.forDownload) {
       final downloadRoute = MaterialPageRoute(
@@ -887,12 +899,7 @@ class _ServidoresModalState extends State<ServidoresModal>
           titulo: tituloFinal,
         ),
       );
-      if (widget.fromPlayer) {
-        nav.pop();
-        nav.pushReplacement(route);
-      } else {
-        nav.pushReplacement(route);
-      }
+      nav.pushReplacement(route);
       _schedulePreload();
       return;
     }
