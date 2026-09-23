@@ -4,10 +4,12 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'notification_helper.dart';
+
 enum DownloadStatus { queued, downloading, completed, failed, cancelled }
 
 class ActiveDownload {
@@ -91,6 +93,25 @@ class ActiveDownload {
   }
 
   int get notificationId => id.hashCode & 0x7FFFFFFF;
+}
+
+// ── Callback del Foreground Service (obligatorio) ───────────────────────────
+@pragma('vm:entry-point')
+void startDownloadCallback() {
+  FlutterForegroundTask.setTaskHandler(DownloadTaskHandler());
+}
+
+class DownloadTaskHandler extends TaskHandler {
+  @override
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
+
+  @override
+  void onRepeatEvent(DateTime timestamp) {
+    // Se llama cada 5 s; la descarga real corre en el isolate principal
+  }
+
+  @override
+  Future<void> onDestroy(DateTime timestamp) async {}
 }
 
 class DownloadManager extends ChangeNotifier {
@@ -177,6 +198,37 @@ class DownloadManager extends ChangeNotifier {
     final start = _formatStartTime(item.startedAt);
     final retry = item.attempt > 1 ? ' · Reintento ${item.attempt}' : '';
     return '$pct% · ${item.etaLabel} · Inicio $start$retry';
+  }
+
+  // ── Foreground Service ─────────────────────────────────────────────────
+
+  Future<void> _startForegroundService(ActiveDownload item) async {
+    if (await FlutterForegroundTask.isRunningService) return;
+
+    await FlutterForegroundTask.startService(
+      notificationTitle: item.displayTitle,
+      notificationText: _notificationBody(item),
+      callback: startDownloadCallback,
+    );
+  }
+
+  Future<void> _updateForegroundNotification(ActiveDownload item) async {
+    if (!await FlutterForegroundTask.isRunningService) return;
+    await FlutterForegroundTask.updateService(
+      notificationTitle: item.displayTitle,
+      notificationText: _notificationBody(item),
+    );
+  }
+
+  Future<void> _stopForegroundServiceIfNeeded() async {
+    final stillActive = _active.values.any(
+      (d) =>
+          d.status == DownloadStatus.downloading ||
+          d.status == DownloadStatus.queued,
+    );
+    if (!stillActive && await FlutterForegroundTask.isRunningService) {
+      await FlutterForegroundTask.stopService();
+    }
   }
 
   /// Convierte URL de TMDB a baja calidad para que ocupe poco espacio
@@ -282,6 +334,9 @@ class DownloadManager extends ChangeNotifier {
     _active[id] = item;
     notifyListeners();
 
+    // Arrancar Foreground Service (mantiene la app viva en segundo plano)
+    unawaited(_startForegroundService(item));
+
     unawaited(
       NotificationHelper.showProgress(
         id: item.notificationId,
@@ -369,6 +424,7 @@ class DownloadManager extends ChangeNotifier {
 
       try {
         await _runDownloadOnce(item);
+        await _stopForegroundServiceIfNeeded();
         return; // éxito
       } catch (e) {
         lastError = e;
@@ -377,6 +433,7 @@ class DownloadManager extends ChangeNotifier {
           item.statusText = 'Cancelado';
           notifyListeners();
           await NotificationHelper.cancel(item.notificationId);
+          await _stopForegroundServiceIfNeeded();
           return;
         }
 
@@ -395,6 +452,7 @@ class DownloadManager extends ChangeNotifier {
             item.statusText = 'Cancelado';
             notifyListeners();
             await NotificationHelper.cancel(item.notificationId);
+            await _stopForegroundServiceIfNeeded();
             return;
           }
           continue;
@@ -406,6 +464,7 @@ class DownloadManager extends ChangeNotifier {
         item.error = e.toString();
         notifyListeners();
         await NotificationHelper.cancel(item.notificationId);
+        await _stopForegroundServiceIfNeeded();
         return;
       }
     }
@@ -416,6 +475,7 @@ class DownloadManager extends ChangeNotifier {
     item.error = lastError?.toString() ?? 'Error desconocido';
     notifyListeners();
     await NotificationHelper.cancel(item.notificationId);
+    await _stopForegroundServiceIfNeeded();
   }
 
   Future<void> _runDownloadOnce(ActiveDownload item) async {
@@ -628,6 +688,8 @@ class DownloadManager extends ChangeNotifier {
       progress: (item.progress * 100).round().clamp(0, 100),
       body: _notificationBody(item),
     );
+    // Actualizar también la notificación del Foreground Service
+    await _updateForegroundNotification(item);
   }
 
   void cancel(String id) {
@@ -643,6 +705,7 @@ class DownloadManager extends ChangeNotifier {
     }
     _active.remove(id);
     notifyListeners();
+    unawaited(_stopForegroundServiceIfNeeded());
   }
 
   String? _findFirstMediaPlaylist(String content, Uri baseUri) {

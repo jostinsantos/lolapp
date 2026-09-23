@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'presentation/mobile/mobile_shell.dart' as mobile;
 import 'presentation/tv/tv_shell.dart' as tv;
@@ -14,13 +15,37 @@ import 'supabase/supabase_config.dart';
 import 'supabase/supabase_client.dart';
 import 'features/profile/presentation/profile_selection_page.dart';
 
-
 const String kModeKey = 'app_mode'; // "mobile" | "tv"
 const String kDisclaimerKey = 'disclaimer_accepted';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Notificaciones
   await NotificationHelper.init();
+
+  // Foreground Task → mantiene la descarga viva en segundo plano
+  FlutterForegroundTask.init(
+    androidNotificationOptions: AndroidNotificationOptions(
+      channelId: 'downloads_channel',
+      channelName: 'Descargas',
+      channelDescription: 'Progreso de descargas de video',
+      channelImportance: NotificationChannelImportance.LOW,
+      priority: NotificationPriority.LOW,
+      showWhen: false,
+    ),
+    iosNotificationOptions: const IOSNotificationOptions(
+      showNotification: false,
+      playSound: false,
+    ),
+    foregroundTaskOptions: ForegroundTaskOptions(
+      eventAction: ForegroundTaskEventAction.repeat(5000), // cada 5 s
+      autoRunOnBoot: false,
+      allowWakeLock: true,
+      allowWifiLock: true,
+    ),
+  );
+
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   runApp(const MyApp());
 }
@@ -123,7 +148,6 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   void _focusAfterFrame(FocusNode node) {
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) node.requestFocus();
     });
@@ -159,7 +183,6 @@ class _SplashScreenState extends State<SplashScreen> {
     await prefs.setBool(kDisclaimerKey, true);
     await _goToHome();
   }
-
 
   void _rejectDisclaimer() {
     SystemNavigator.pop();
@@ -210,7 +233,6 @@ class _SplashScreenState extends State<SplashScreen> {
       ),
     );
   }
-
 
   // ── UI ─────────────────────────────────────────────────────────────────
 

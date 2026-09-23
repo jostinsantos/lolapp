@@ -37,7 +37,7 @@ dependencies:
   crypto: ^3.0.3
   supabase_flutter: ^2.8.0
   timezone: ^0.9.4        
-  
+  flutter_foreground_task: ^8.14.0
   
 dev_dependencies:
   flutter_test:

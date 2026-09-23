@@ -31,6 +31,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <!-- ========== DESCARGA EN SEGUNDO PLANO ========== -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <!-- ========================================================== -->
 
     <application
@@ -104,12 +105,19 @@
             </intent-filter>
         </receiver>
 
-        <!-- Servicio de primer plano para descargas (Android 14+) -->
+        <!-- Servicio de primer plano para notificaciones (flutter_local_notifications) -->
         <service
             android:name="com.dexterous.flutterlocalnotifications.ForegroundService"
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Foreground Task (descargas en segundo plano - flutter_foreground_task) -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false"
+            android:stopWithTask="false" />
 
         <meta-data
             android:name="flutterEmbedding"
