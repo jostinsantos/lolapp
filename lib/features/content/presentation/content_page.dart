@@ -12,6 +12,9 @@ import '../../player/presentation/player_page.dart';
 import '../../downloads/presentation/download_manager.dart';
 import '../../downloads/presentation/extractor_download_page.dart';
 import '../../../supabase/guardados_service.dart';
+// Recordatorios de capítulos (ajusta rutas si hace falta)
+import 'widgets/tmdb_upcoming_service.dart';
+import 'widgets/upcoming_episodes_modal.dart';
 
 const kAccentColor = Color(0xFFE50914);
 const kPurpleSeason = Color(0xFFC026FF);
@@ -86,6 +89,10 @@ class _PageContenidoState extends State<PageContenido>
   bool _showOptions = false;
   bool _playLoading = false;
   String? _loadingEpisodeKey;
+
+  /// Serie en emisión (Returning Series / In Production / Planned) → mostrar campana
+  bool _isSeriesAiring = false;
+
   late final AnimationController _animController;
   late final Animation<double> _scaleAnim;
   late final Animation<double> _fadeAnim;
@@ -161,6 +168,7 @@ class _PageContenidoState extends State<PageContenido>
         _loadProgress();
         _loadEpisodeProgress();
         _loadDownloadedState();
+        _checkAiring();
       } else {
         setState(() {
           _error = json['error']?.toString() ?? 'No se encontró el contenido';
@@ -770,6 +778,39 @@ class _PageContenidoState extends State<PageContenido>
     }
   }
 
+  // ── Recordatorios de capítulos por estrenar ─────────────────────────────
+  Future<void> _checkAiring() async {
+    final isMovie =
+        (_data?['type']?.toString() ?? _resolvedMediaType) == 'movie';
+    if (isMovie) {
+      if (mounted) setState(() => _isSeriesAiring = false);
+      return;
+    }
+    // 1) status ya viene en _data desde TMDB
+    final status = (_data?['status']?.toString() ?? '').toLowerCase().trim();
+    var airing = status == 'returning series' ||
+        status == 'in production' ||
+        status == 'planned';
+
+    // 2) Si no hay status claro, consulta dedicada
+    if (!airing && status.isEmpty) {
+      try {
+        airing = await TmdbUpcomingService().isSeriesAiring(_resolvedTmdbId);
+      } catch (_) {}
+    }
+
+    if (mounted) setState(() => _isSeriesAiring = airing);
+  }
+
+  void _openUpcomingReminders() {
+    final title = _data?['title']?.toString() ?? '';
+    UpcomingEpisodesModal.show(
+      context: context,
+      tmdbId: _resolvedTmdbId,
+      seriesTitle: title,
+    );
+  }
+
   void _toggleOptions() {
     setState(() {
       _showOptions = !_showOptions;
@@ -1127,6 +1168,12 @@ class _PageContenidoState extends State<PageContenido>
                           onPressed: () => Navigator.pop(context),
                         ),
                         const Spacer(),
+                        // Campana solo en series en emisión
+                        if (!isMovie && _isSeriesAiring)
+                          _buildCircleButton(
+                            icon: Icons.notifications_none_rounded,
+                            onPressed: _openUpcomingReminders,
+                          ),
                         if (isMovie) _buildLetterboxdButton(),
                       ],
                     ),

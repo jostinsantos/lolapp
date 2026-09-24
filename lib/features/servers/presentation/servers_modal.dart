@@ -9,6 +9,7 @@ import '../../../data/aggregators/source_aggregator.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_content.dart';
 import '../../player/data/extractor.dart';
 import '../../player/presentation/player_page.dart'; // ← ajusta ruta
+import '../../player/presentation/web_player_view.dart'; // WEBVIEW → página dedicada
 import '../../downloads/presentation/extractor_download_page.dart';
 import '../../discover/presentation/source_discovery_page.dart';
 import 'server_preloader_service.dart';
@@ -692,8 +693,11 @@ class _ServidoresModalState extends State<ServidoresModal>
                 final activas = _cfg!.fuentesActivas;
                 if (activas.every((f) => _fuenteDone[f] == true)) {
                   _scraping = false;
-                  _persistCache();
+                  _persistCache(); // final
                   _schedulePreload();
+                } else {
+                  // Fuente terminó: guardar lo acumulado hasta ahora
+                  unawaited(_persistCache());
                 }
               });
               return;
@@ -730,6 +734,8 @@ class _ServidoresModalState extends State<ServidoresModal>
               _addServerToBuckets(map, eventFuente: event.fuente);
               _maybeReorderTabs();
             });
+            // Guardar en caché YA (uno a uno), sin esperar el final
+            unawaited(_persistCache());
           },
           onError: (e) {
             if (mounted) {
@@ -790,7 +796,7 @@ class _ServidoresModalState extends State<ServidoresModal>
     return DateTime.now().millisecondsSinceEpoch - ts <= TvM3u8Cache.ttlMs;
   }
 
-  /// true = va al PLAYER nativo. false = va al Extractor (WebView).
+  /// true = va al PLAYER nativo. false = va a WebPlayerView.
   bool _esPlayer(Map<String, dynamic> s) {
     if (_hasFreshM3u8(s)) return true;
     final url = s['servidor_url']?.toString() ?? '';
@@ -897,9 +903,9 @@ class _ServidoresModalState extends State<ServidoresModal>
       return;
     }
 
-    // ── WEBVIEW (servidor válido pero m3u8 vencido/ausente) ───────────
-    final extractorRoute = MaterialPageRoute(
-      builder: (_) => ExtractorPage(
+    // ── WEBVIEW → WebPlayerView (ya no ExtractorPage) ─────────────────
+    final webRoute = MaterialPageRoute(
+      builder: (_) => WebPlayerView(
         idcontenido: widget.idcontenido,
         tmdbId: _resolvedTmdbId,
         temporada: _isMovie ? null : widget.temporada,
@@ -909,13 +915,15 @@ class _ServidoresModalState extends State<ServidoresModal>
         tipo: _mediaType,
         titulo: tituloFinal,
         idioma: idioma,
+        backdropUrl: _backdrop ?? widget.backdropUrl,
+        posterUrl: widget.posterUrl,
       ),
     );
     if (widget.fromPlayer) {
       nav.pop();
-      nav.pushReplacement(extractorRoute);
+      nav.pushReplacement(webRoute);
     } else {
-      nav.pushReplacement(extractorRoute);
+      nav.pushReplacement(webRoute);
     }
     _schedulePreload();
   }

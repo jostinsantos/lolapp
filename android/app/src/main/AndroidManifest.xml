@@ -112,10 +112,12 @@
             android:stopWithTask="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- Foreground Task (descargas en segundo plano - flutter_foreground_task) -->
+        <!-- Foreground Task (descargas + Cast - flutter_foreground_task)
+             dataSync  → descargas
+             mediaPlayback → Cast (Android 14+ exige el tipo correcto) -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
-            android:foregroundServiceType="dataSync"
+            android:foregroundServiceType="dataSync|mediaPlayback"
             android:exported="false"
             android:stopWithTask="false" />
 

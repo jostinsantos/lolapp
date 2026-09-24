@@ -20,6 +20,7 @@ import 'sources/sources_section.dart';
 import 'cache/cache_section.dart';
 import 'downloads/downloads_section.dart';
 import 'supabase/supabase_section.dart';
+import 'notifications/notifications_section.dart'; // Notificaciones
 import '../../../presentation/mobile/mobile_shell.dart';
 import '../../../core/constants/tmdb_apis.dart';
 import '../../../supabase/supabase_config.dart';
@@ -1416,6 +1417,20 @@ class _ConfigPageState extends State<ConfigPage> {
                         },
                       ),
                     ),
+                  ),
+                  _buildSectionCard(
+                    title: 'Notificaciones',
+                    subtitle:
+                        'Avisos de estrenos, hora y prueba',
+                    icon: Icons.notifications_active_rounded,
+                    accent: const Color(0xFFFF6B00),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const NotificationsSectionPage(),
+                        ),
+                      );
+                    },
                   ),
                   _buildSectionCard(
                     title: 'Supabase',

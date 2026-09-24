@@ -1,86 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:dart_cast/dart_cast.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+import 'cast_manager.dart';
+import 'cast_screen.dart';
 
 // =============================================================================
-// CastManager – mantiene la sesión viva aunque salgas del reproductor
-// =============================================================================
-
-class CastManager {
-  static final CastManager _instance = CastManager._();
-  factory CastManager() => _instance;
-  CastManager._();
-
-  CastService? _castService;
-  CastSession? _session;
-  bool _isConnected = false;
-
-  final FlutterLocalNotificationsPlugin _notif =
-      FlutterLocalNotificationsPlugin();
-  static const int _notifId = 9999;
-
-  bool get isConnected => _isConnected;
-  CastSession? get session => _session;
-
-  Future<void> connect(
-    CastService service,
-    CastSession session,
-    String title,
-  ) async {
-    // Cerrar sesión anterior si existía
-    await disconnect(showNotif: false);
-
-    _castService = service;
-    _session = session;
-    _isConnected = true;
-
-    await _showCastNotification(title);
-  }
-
-  Future<void> disconnect({bool showNotif = true}) async {
-    try {
-      await _session?.stop();
-      await _session?.disconnect();
-    } catch (_) {}
-
-    try {
-      _castService?.dispose();
-    } catch (_) {}
-
-    _session = null;
-    _castService = null;
-    _isConnected = false;
-
-    if (showNotif) {
-      await _notif.cancel(_notifId);
-    }
-  }
-
-  Future<void> _showCastNotification(String title) async {
-    const androidDetails = AndroidNotificationDetails(
-      'cast_channel',
-      'Cast en curso',
-      channelDescription: 'Notificación mientras se transmite a la TV',
-      importance: Importance.low,
-      priority: Priority.low,
-      ongoing: true, // no se puede deslizar
-      autoCancel: false,
-      showWhen: false,
-      category: AndroidNotificationCategory.service,
-    );
-
-    await _notif.show(
-      _notifId,
-      'Transmitiendo a TV',
-      title.isNotEmpty ? title : 'Reproduciendo en Chromecast / TV',
-      const NotificationDetails(android: androidDetails),
-    );
-  }
-}
-
-// =============================================================================
-// Botón Cast
+// Botón Cast – abre modal de dispositivos o controles si ya está conectado
 // =============================================================================
 
 class CastButton extends StatefulWidget {
@@ -88,8 +14,16 @@ class CastButton extends StatefulWidget {
   final Map<String, String> headers;
   final String title;
   final Color accentColor;
+  final String? backdropUrl;
+  final double? introStartSec;
+  final double? introEndSec;
+  final double? outroStartSec;
+  final double? outroEndSec;
   final VoidCallback? onCastStarted;
   final VoidCallback? onCastStopped;
+
+  /// Si true, al conectar navega a [CastScreen] en lugar de solo pausar el player.
+  final bool openCastScreenOnConnect;
 
   const CastButton({
     super.key,
@@ -97,8 +31,14 @@ class CastButton extends StatefulWidget {
     this.headers = const {},
     this.title = '',
     this.accentColor = const Color(0xFFFF6B00),
+    this.backdropUrl,
+    this.introStartSec,
+    this.introEndSec,
+    this.outroStartSec,
+    this.outroEndSec,
     this.onCastStarted,
     this.onCastStopped,
+    this.openCastScreenOnConnect = true,
   });
 
   @override
@@ -107,13 +47,22 @@ class CastButton extends StatefulWidget {
 
 class _CastButtonState extends State<CastButton> {
   bool _isConnecting = false;
+  StreamSubscription? _connSub;
 
   bool get _isConnected => CastManager().isConnected;
 
   @override
+  void initState() {
+    super.initState();
+    _connSub = CastManager().connectedStream.listen((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
   void dispose() {
-    // IMPORTANTE: ya NO desconectamos aquí.
-    // El Cast sigue vivo aunque salgas del reproductor.
+    _connSub?.cancel();
+    // NO desconectamos aquí: el Cast sigue vivo al salir del reproductor.
     super.dispose();
   }
 
@@ -139,20 +88,36 @@ class _CastButtonState extends State<CastButton> {
   }
 
   Future<void> _showDeviceModal() async {
-    await showDialog(
+    final nav = Navigator.of(context);
+
+    final result = await showDialog<bool>(
       context: context,
       barrierColor: Colors.black87,
+      barrierDismissible: false,
       builder: (ctx) => _CastDeviceDialog(
         accentColor: widget.accentColor,
         videoUrl: widget.videoUrl,
         headers: widget.headers,
         title: widget.title,
+        backdropUrl: widget.backdropUrl ?? '',
+        introStartSec: widget.introStartSec,
+        introEndSec: widget.introEndSec,
+        outroStartSec: widget.outroStartSec,
+        outroEndSec: widget.outroEndSec,
         onConnected: (service, session) async {
-          await CastManager().connect(service, session, widget.title);
-          if (mounted) {
-            setState(() => _isConnecting = false);
-          }
-          widget.onCastStarted?.call();
+          // Registrar sesión en CastManager
+          await CastManager().connect(
+            service: service,
+            session: session,
+            title: widget.title,
+            videoUrl: widget.videoUrl,
+            headers: widget.headers,
+            backdropUrl: widget.backdropUrl ?? '',
+            introStart: widget.introStartSec,
+            introEnd: widget.introEndSec,
+            outroStart: widget.outroStartSec,
+            outroEnd: widget.outroEndSec,
+          );
         },
         onError: (msg) {
           if (mounted) {
@@ -166,24 +131,78 @@ class _CastButtonState extends State<CastButton> {
         },
       ),
     );
+
+    // result == true → se conectó y el dialog ya se cerró solo
+    if (result == true && mounted) {
+      if (mounted) setState(() {}); // actualiza icono a "conectado"
+      widget.onCastStarted?.call();
+
+      if (widget.openCastScreenOnConnect) {
+        // REEMPLAZAR el player por CastScreen (sin volver al player al atrás)
+        await nav.pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => CastScreen(
+              title: widget.title,
+              backdropUrl: widget.backdropUrl,
+              accentColor: widget.accentColor,
+            ),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _showConnectedModal() async {
     final session = CastManager().session;
     if (session == null) return;
 
+    // Opción A: ir directo a la pantalla de Cast (reemplaza el player)
+    if (widget.openCastScreenOnConnect) {
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => CastScreen(
+            title: widget.title.isNotEmpty
+                ? widget.title
+                : CastManager().currentTitle,
+            backdropUrl: widget.backdropUrl ?? CastManager().backdropUrl,
+            accentColor: widget.accentColor,
+          ),
+        ),
+      );
+      if (mounted) setState(() {});
+      return;
+    }
+
+    // Opción B: modal compacto de controles
     await showDialog(
       context: context,
       barrierColor: Colors.black87,
       builder: (ctx) => _CastControlsDialog(
         session: session,
         accentColor: widget.accentColor,
-        title: widget.title,
+        title: widget.title.isNotEmpty
+            ? widget.title
+            : CastManager().currentTitle,
         onDisconnect: () async {
           await CastManager().disconnect();
           if (mounted) setState(() {});
           widget.onCastStopped?.call();
           if (ctx.mounted) Navigator.pop(ctx);
+        },
+        onOpenFullScreen: () {
+          Navigator.pop(ctx);
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => CastScreen(
+                title: widget.title.isNotEmpty
+                    ? widget.title
+                    : CastManager().currentTitle,
+                backdropUrl:
+                    widget.backdropUrl ?? CastManager().backdropUrl,
+                accentColor: widget.accentColor,
+              ),
+            ),
+          );
         },
       ),
     );
@@ -206,7 +225,9 @@ class _CastButtonState extends State<CastButton> {
                 : Colors.transparent,
           ),
           child: Icon(
-            _isConnected ? Icons.cast_connected_rounded : Icons.cast_rounded,
+            _isConnected
+                ? Icons.cast_connected_rounded
+                : Icons.cast_rounded,
             color: _isConnected ? widget.accentColor : Colors.white,
             size: 22,
           ),
@@ -225,7 +246,13 @@ class _CastDeviceDialog extends StatefulWidget {
   final String videoUrl;
   final Map<String, String> headers;
   final String title;
-  final void Function(CastService service, CastSession session) onConnected;
+  final String backdropUrl;
+  final double? introStartSec;
+  final double? introEndSec;
+  final double? outroStartSec;
+  final double? outroEndSec;
+  final Future<void> Function(CastService service, CastSession session)
+      onConnected;
   final void Function(String message) onError;
 
   const _CastDeviceDialog({
@@ -233,6 +260,11 @@ class _CastDeviceDialog extends StatefulWidget {
     required this.videoUrl,
     required this.headers,
     required this.title,
+    required this.backdropUrl,
+    this.introStartSec,
+    this.introEndSec,
+    this.outroStartSec,
+    this.outroEndSec,
     required this.onConnected,
     required this.onError,
   });
@@ -317,8 +349,13 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
       ));
 
       if (!mounted) return;
-      widget.onConnected(_castService, session);
-      Navigator.pop(context);
+
+      // Guardar sesión en CastManager
+      await widget.onConnected(_castService, session);
+
+      if (!mounted) return;
+      // Cerrar dialog con true → el botón Cast abre CastScreen solo
+      Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {
         setState(() => _connectingId = null);
@@ -330,7 +367,7 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
   @override
   void dispose() {
     _discoverySub?.cancel();
-    // NO hacemos dispose del CastService aquí porque lo gestiona CastManager
+    // NO dispose del CastService: lo gestiona CastManager
     super.dispose();
   }
 
@@ -527,7 +564,8 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
             borderRadius: BorderRadius.circular(14),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               decoration: BoxDecoration(
                 color: isConnecting
                     ? widget.accentColor.withValues(alpha: 0.12)
@@ -552,37 +590,23 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
                     ),
                     child: Icon(
                       Icons.tv_rounded,
-                      color:
-                          isConnecting ? widget.accentColor : Colors.white70,
+                      color: isConnecting
+                          ? widget.accentColor
+                          : Colors.white70,
                       size: 24,
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          device.name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          '${device.protocol.name} · ${device.address}',
-                          style: TextStyle(
-                            color: Colors.grey[500],
-                            fontSize: 12,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+                    child: Text(
+                      device.name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -612,7 +636,7 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
 }
 
 // =============================================================================
-// Modal: controles con sesión activa
+// Modal compacto de controles (alternativa a CastScreen)
 // =============================================================================
 
 class _CastControlsDialog extends StatefulWidget {
@@ -620,12 +644,14 @@ class _CastControlsDialog extends StatefulWidget {
   final Color accentColor;
   final String title;
   final VoidCallback onDisconnect;
+  final VoidCallback? onOpenFullScreen;
 
   const _CastControlsDialog({
     required this.session,
     required this.accentColor,
     required this.title,
     required this.onDisconnect,
+    this.onOpenFullScreen,
   });
 
   @override
@@ -641,13 +667,14 @@ class _CastControlsDialogState extends State<_CastControlsDialog> {
   @override
   void initState() {
     super.initState();
-    _stateSub = widget.session.stateStream.listen((state) {
+    _isPlaying = CastManager().isPlaying;
+    _position = CastManager().position;
+
+    _stateSub = CastManager().playingStream.listen((playing) {
       if (!mounted) return;
-      setState(() {
-        _isPlaying = state.toString().toLowerCase().contains('play');
-      });
+      setState(() => _isPlaying = playing);
     });
-    _posSub = widget.session.positionStream.listen((pos) {
+    _posSub = CastManager().positionStream.listen((pos) {
       if (!mounted) return;
       setState(() => _position = pos);
     });
@@ -661,22 +688,11 @@ class _CastControlsDialogState extends State<_CastControlsDialog> {
   }
 
   Future<void> _togglePlay() async {
-    try {
-      if (_isPlaying) {
-        await widget.session.pause();
-      } else {
-        await widget.session.play();
-      }
-      setState(() => _isPlaying = !_isPlaying);
-    } catch (_) {}
+    await CastManager().togglePlay();
   }
 
   Future<void> _seekRelative(int seconds) async {
-    try {
-      var target = _position + Duration(seconds: seconds);
-      if (target < Duration.zero) target = Duration.zero;
-      await widget.session.seek(target);
-    } catch (_) {}
+    await CastManager().seekRelative(seconds);
   }
 
   String _fmt(Duration d) {
@@ -776,7 +792,25 @@ class _CastControlsDialogState extends State<_CastControlsDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 22),
+              if (widget.onOpenFullScreen != null) ...[
+                const SizedBox(height: 16),
+                TextButton.icon(
+                  onPressed: widget.onOpenFullScreen,
+                  icon: Icon(
+                    Icons.open_in_full_rounded,
+                    color: widget.accentColor,
+                    size: 18,
+                  ),
+                  label: Text(
+                    'Abrir pantalla de transmisión',
+                    style: TextStyle(
+                      color: widget.accentColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(

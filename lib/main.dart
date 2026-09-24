@@ -15,21 +15,32 @@ import 'supabase/supabase_config.dart';
 import 'supabase/supabase_client.dart';
 import 'features/profile/presentation/profile_selection_page.dart';
 
+// Cast: botones de la notificación (play/pause/seek)
+import 'features/player/presentation/widgets/cast_manager.dart';
+// ⚠ Ajusta la ruta de import al sitio real de cast_manager.dart en tu proyecto.
+//    Ejemplos posibles:
+//    'features/player/presentation/widgets/cast_manager.dart'
+//    'features/player/cast/cast_manager.dart'
+//    'widgets/cast_manager.dart'
+
 const String kModeKey = 'app_mode'; // "mobile" | "tv"
 const String kDisclaimerKey = 'disclaimer_accepted';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Notificaciones
+  // Notificaciones (descargas + cast)
   await NotificationHelper.init();
 
-  // Foreground Task → mantiene la descarga viva en segundo plano
+  // Foreground Task → mantiene descargas Y cast vivos en segundo plano
+  // Un solo init: tanto DownloadManager como CastManager reutilizan este servicio
+  // y actualizan título/texto/botones con updateService cuando hace falta.
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'downloads_channel',
-      channelName: 'Descargas',
-      channelDescription: 'Progreso de descargas de video',
+      channelName: 'Descargas y Cast',
+      channelDescription:
+          'Progreso de descargas y transmisión Cast a TV',
       channelImportance: NotificationChannelImportance.LOW,
       priority: NotificationPriority.LOW,
       showWhen: false,
@@ -45,6 +56,13 @@ void main() async {
       allowWifiLock: true,
     ),
   );
+
+  // Escuchar botones de la notificación del Cast (vienen del isolate del servicio)
+  FlutterForegroundTask.addTaskDataCallback((data) {
+    if (data is Map && data['cast_btn'] is String) {
+      CastManager().handleNotificationButton(data['cast_btn'] as String);
+    }
+  });
 
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   runApp(const MyApp());

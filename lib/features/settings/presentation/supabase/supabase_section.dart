@@ -6,6 +6,9 @@ import '../../../../supabase/supabase_admin.dart';
 import '../../../profile/presentation/profile_selection_page.dart';
 
 const _kAccent = Color(0xFFE50914);
+const _kCard = Color(0xFF16161A);
+const _kBgField = Color(0xFF1C1C22);
+const _kBorder = Color(0x22FFFFFF);
 
 class SupabaseSection extends StatefulWidget {
   const SupabaseSection({super.key});
@@ -25,6 +28,7 @@ class _SupabaseSectionState extends State<SupabaseSection> {
   bool _hasCreds = false;
   bool _isActive = false;
   bool _askEveryLaunch = false;
+  bool _obscureKey = true;
   String? _currentUser;
   String? _statusMsg;
   Color _statusColor = Colors.white54;
@@ -68,7 +72,7 @@ class _SupabaseSectionState extends State<SupabaseSection> {
     final url = _urlCtrl.text.trim();
     final key = _keyCtrl.text.trim();
     if (url.isEmpty || key.isEmpty) {
-      _setStatus('URL y ANON KEY son obligatorios', Colors.red);
+      _setStatus('URL y ANON KEY son obligatorios', Colors.redAccent);
       return;
     }
 
@@ -84,15 +88,15 @@ class _SupabaseSectionState extends State<SupabaseSection> {
       if (!mounted) return;
       setState(() {
         _saving = false;
-        _hasCreds = true; // guardado en prefs aunque init falle
+        _hasCreds = true;
       });
 
       if (ok) {
         final loggedIn = await SupabaseConfig.isLoggedIn();
         if (!loggedIn) {
           _setStatus(
-            'Credenciales guardadas. Elige un perfil para activar Supabase.',
-            Colors.green,
+            'Credenciales guardadas. Elige un perfil.',
+            const Color(0xFF4ADE80),
           );
           if (!mounted) return;
           await Navigator.of(context).push(
@@ -103,8 +107,8 @@ class _SupabaseSectionState extends State<SupabaseSection> {
                   Navigator.of(context).pop();
                   _load();
                   _setStatus(
-                    'Perfil activado. Tus guardados se sincronizarán en la nube.',
-                    Colors.green,
+                    'Perfil activado. Guardados en la nube.',
+                    const Color(0xFF4ADE80),
                   );
                 },
               ),
@@ -112,22 +116,21 @@ class _SupabaseSectionState extends State<SupabaseSection> {
           );
           await _load();
         } else {
-          _setStatus('Credenciales actualizadas. Supabase activo.', Colors.green);
+          _setStatus('Credenciales actualizadas.', const Color(0xFF4ADE80));
           setState(() => _isActive = true);
         }
       } else {
-        // Guardado OK; init puede fallar si las tablas aún no existen
         _setStatus(
-          'Credenciales guardadas. Si falla la conexión, revisa URL/KEY o crea las tablas SQL.',
-          Colors.orange,
+          'Guardado. Si falla la conexión, revisa URL/KEY o tablas SQL.',
+          Colors.orangeAccent,
         );
       }
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       setState(() => _saving = false);
       _setStatus(
-        'Credenciales guardadas. Reinicia la app si no se activa.',
-        Colors.orange,
+        'Guardado. Reinicia la app si no se activa.',
+        Colors.orangeAccent,
       );
     }
   }
@@ -142,32 +145,90 @@ class _SupabaseSectionState extends State<SupabaseSection> {
     setState(() => _testing = false);
     _setStatus(
       ok ? 'Conexión OK' : 'Falló la conexión. Revisa URL, KEY y tablas.',
-      ok ? Colors.green : Colors.red,
+      ok ? const Color(0xFF4ADE80) : Colors.redAccent,
     );
   }
 
   Future<void> _clear() async {
-    final confirm = await showDialog<bool>(
+    final confirm = await showModalBottomSheet<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1a1a2e),
-        title: const Text('Desactivar Supabase', style: TextStyle(color: Colors.white)),
-        content: const Text(
-          'Se eliminarán las credenciales y la sesión. '
-          'Tus guardados LOCALES (cache) NO se borran. '
-          'La app volverá a usar solo el cache del dispositivo.',
-          style: TextStyle(color: Colors.white70),
+      backgroundColor: _kCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Text(
+                'Desactivar Supabase',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Se eliminan credenciales y sesión. '
+                'Los guardados locales no se borran.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.55),
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white70,
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.15),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Cancelar'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent.withValues(alpha: 0.2),
+                        foregroundColor: Colors.redAccent,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Desactivar'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Desactivar', style: TextStyle(color: Colors.red)),
-          ),
-        ],
       ),
     );
     if (confirm != true) return;
@@ -181,10 +242,7 @@ class _SupabaseSectionState extends State<SupabaseSection> {
       _isActive = false;
       _currentUser = null;
     });
-    _setStatus(
-      'Supabase desactivado. La app usa de nuevo el cache local.',
-      Colors.orange,
-    );
+    _setStatus('Supabase desactivado. Caché local activo.', Colors.orangeAccent);
   }
 
   Future<void> _changeProfile() async {
@@ -205,26 +263,25 @@ class _SupabaseSectionState extends State<SupabaseSection> {
   Future<void> _linkCode() async {
     if (!SupabaseAdmin.isAdminConfigured) {
       _setStatus(
-        'El admin de la app no ha configurado el servidor de vinculación.',
-        Colors.red,
+        'El admin no configuró el servidor de vinculación.',
+        Colors.redAccent,
       );
       return;
     }
 
     final code = _codeCtrl.text.trim();
     if (code.length < 4) {
-      _setStatus('Código inválido', Colors.red);
+      _setStatus('Código inválido', Colors.redAccent);
       return;
     }
     final url = await SupabaseConfig.getUrl();
     final key = await SupabaseConfig.getAnonKey();
     if (url == null || key == null) {
-      _setStatus('Primero configura TU URL y ANON KEY personales arriba', Colors.red);
+      _setStatus('Primero configura tu URL y ANON KEY', Colors.redAccent);
       return;
     }
 
     setState(() => _saving = true);
-    // Escribe en el proyecto ADMIN de la app (no en el del usuario)
     final ok = await SupabaseAdmin.linkCodeWithCredentials(
       code: code,
       supabaseUrl: url,
@@ -234,9 +291,9 @@ class _SupabaseSectionState extends State<SupabaseSection> {
 
     _setStatus(
       ok
-          ? 'Código vinculado. La TV recibirá tus credenciales en unos segundos.'
-          : 'No se pudo vincular. Verifica el código (y que el admin tenga la tabla tv_link).',
-      ok ? Colors.green : Colors.red,
+          ? 'Código vinculado. La TV recibirá tus credenciales.'
+          : 'No se pudo vincular. Verifica el código.',
+      ok ? const Color(0xFF4ADE80) : Colors.redAccent,
     );
   }
 
@@ -288,50 +345,92 @@ create policy "all guardados" on public.guardados for all using (true) with chec
 alter table public.tv_link enable row level security;
 create policy "all tv_link" on public.tv_link for all using (true) with check (true);''';
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1a1a2e),
-        title: const Text(
-          'Estructura de tablas SQL',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: const SingleChildScrollView(
-          child: SelectableText(
-            sql,
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-              fontFamily: 'monospace',
+      isScrollControlled: true,
+      backgroundColor: _kCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.92,
+        builder: (_, scroll) => Column(
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-          ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Estructura SQL',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      Clipboard.setData(const ClipboardData(text: sql));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('SQL copiado'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.copy_rounded, size: 16),
+                    label: const Text('Copiar'),
+                    style: TextButton.styleFrom(foregroundColor: _kAccent),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(Icons.close, color: Colors.white54),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: Colors.white12),
+            Expanded(
+              child: SingleChildScrollView(
+                controller: scroll,
+                padding: const EdgeInsets.all(16),
+                child: const SelectableText(
+                  sql,
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    height: 1.45,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Clipboard.setData(const ClipboardData(text: sql));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('SQL copiado al portapapeles')),
-              );
-            },
-            child: const Text('Copiar SQL', style: TextStyle(color: _kAccent)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cerrar'),
-          ),
-        ],
       ),
     );
   }
 
-
   Future<void> _showProfileLoginModal() async {
     final selected = await showModalBottomSheet<bool>(
       context: context,
-      backgroundColor: const Color(0xFF1a1a2e),
+      backgroundColor: _kCard,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder: (ctx) {
         return SafeArea(
@@ -356,52 +455,32 @@ create policy "all tv_link" on public.tv_link for all using (true) with check (t
                   'Inicio de sesión de perfil',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: 17,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  'Elige cómo entra la app cuando Supabase está activo',
-                  style: TextStyle(color: Colors.white54, fontSize: 13),
+                Text(
+                  'Cómo entra la app cuando Supabase está activo',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.45),
+                    fontSize: 13,
+                  ),
                 ),
                 const SizedBox(height: 16),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.person_search,
-                    color: _askEveryLaunch ? _kAccent : Colors.white54,
-                  ),
-                  title: const Text(
-                    'Pedir perfil cada vez',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  subtitle: const Text(
-                    'Al abrir siempre eliges quién está viendo',
-                    style: TextStyle(color: Colors.white38, fontSize: 12),
-                  ),
-                  trailing: _askEveryLaunch
-                      ? const Icon(Icons.check_circle, color: _kAccent)
-                      : null,
+                _prefTile(
+                  selected: _askEveryLaunch,
+                  icon: Icons.person_search_rounded,
+                  title: 'Pedir perfil cada vez',
+                  subtitle: 'Al abrir siempre eliges quién mira',
                   onTap: () => Navigator.pop(ctx, true),
                 ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.history,
-                    color: !_askEveryLaunch ? _kAccent : Colors.white54,
-                  ),
-                  title: const Text(
-                    'Recordar último perfil',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  subtitle: const Text(
-                    'Entra directo con el último perfil usado',
-                    style: TextStyle(color: Colors.white38, fontSize: 12),
-                  ),
-                  trailing: !_askEveryLaunch
-                      ? const Icon(Icons.check_circle, color: _kAccent)
-                      : null,
+                const SizedBox(height: 8),
+                _prefTile(
+                  selected: !_askEveryLaunch,
+                  icon: Icons.history_rounded,
+                  title: 'Recordar último perfil',
+                  subtitle: 'Entra directo con el último usado',
                   onTap: () => Navigator.pop(ctx, false),
                 ),
               ],
@@ -415,244 +494,558 @@ create policy "all tv_link" on public.tv_link for all using (true) with check (t
     setState(() => _askEveryLaunch = selected);
   }
 
+  Widget _prefTile({
+    required bool selected,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: selected
+          ? _kAccent.withValues(alpha: 0.12)
+          : Colors.white.withValues(alpha: 0.04),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                color: selected ? _kAccent : Colors.white54,
+                size: 22,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.4),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (selected)
+                const Icon(Icons.check_circle_rounded, color: _kAccent, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
       return const Padding(
-        padding: EdgeInsets.all(24),
+        padding: EdgeInsets.all(32),
         child: Center(child: CircularProgressIndicator(color: _kAccent)),
       );
     }
 
+    // Column (no ListView): esta sección ya vive dentro del scroll de Ajustes.
+    // ListView anidado → "Vertical viewport was given unbounded height".
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const Text(
-            'Supabase (opcional)',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            _isActive
-                ? 'Activo · Perfil: ${_currentUser ?? "—"}'
-                : _hasCreds
-                    ? 'Credenciales guardadas · Falta elegir perfil'
-                    : 'No configurado · La app usa cache local',
-            style: TextStyle(
-              color: _isActive
-                  ? Colors.greenAccent
-                  : _hasCreds
-                      ? Colors.orangeAccent
-                      : Colors.white38,
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Si no configuras nada, la app funciona exactamente igual que antes '
-            '(guardados e historial en el dispositivo). Supabase solo se activa '
-            'cuando pegas tu URL + ANON KEY y eliges un perfil.',
-            style: TextStyle(color: Colors.white38, fontSize: 12),
+        // ── Header estado ────────────────────────────────────────────
+        _StatusHeader(
+          isActive: _isActive,
+          hasCreds: _hasCreds,
+          userName: _currentUser,
+        ),
+        const SizedBox(height: 20),
+
+        // ── Cuenta / perfil ──────────────────────────────────────────
+        if (_isActive || _hasCreds) ...[
+          _SectionCard(
+            title: 'Cuenta',
+            children: [
+              _ActionRow(
+                icon: Icons.manage_accounts_rounded,
+                title: 'Inicio de sesión',
+                subtitle: _askEveryLaunch
+                    ? 'Pedir perfil cada vez'
+                    : 'Recordar último perfil',
+                onTap: _showProfileLoginModal,
+              ),
+              if (_isActive) ...[
+                const SizedBox(height: 4),
+                Divider(color: Colors.white.withValues(alpha: 0.06), height: 1),
+                const SizedBox(height: 4),
+                _ActionRow(
+                  icon: Icons.switch_account_rounded,
+                  title: 'Cambiar perfil',
+                  subtitle: _currentUser ?? 'Elegir otro',
+                  onTap: _changeProfile,
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 16),
+        ],
 
-          // Inicio de sesión de perfil (modal)
-          if (_isActive || _hasCreds) ...[
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.manage_accounts, color: _kAccent),
-              title: const Text(
-                'Inicio de sesión de perfil',
-                style: TextStyle(color: Colors.white, fontSize: 14),
-              ),
-              subtitle: Text(
-                _askEveryLaunch
-                    ? 'Actual: Pedir perfil cada vez'
-                    : 'Actual: Recordar último perfil',
-                style: const TextStyle(color: Colors.white38, fontSize: 12),
-              ),
-              trailing: const Icon(Icons.chevron_right, color: Colors.white38),
-              onTap: _showProfileLoginModal,
+        // ── Credenciales ─────────────────────────────────────────────
+        _SectionCard(
+          title: 'Credenciales',
+          subtitle: 'Tu proyecto Supabase personal',
+          children: [
+            _fieldLabel('URL del proyecto'),
+            TextField(
+              controller: _urlCtrl,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              keyboardType: TextInputType.url,
+              decoration: _deco('https://xxxx.supabase.co'),
             ),
-          ],
-
-          const SizedBox(height: 12),
-
-          // Botón cambiar perfil (solo si ya hay conexión activa)
-          if (_isActive) ...[
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _changeProfile,
-                icon: const Icon(Icons.switch_account, color: _kAccent),
-                label: Text(
-                  'Cambiar perfil (${_currentUser ?? "..."})',
-                  style: const TextStyle(color: Colors.white),
-                ),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: _kAccent),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+            const SizedBox(height: 14),
+            _fieldLabel('Anon key'),
+            TextField(
+              controller: _keyCtrl,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              obscureText: _obscureKey,
+              decoration: _deco('eyJhbGciOiJIUzI1NiIs…').copyWith(
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureKey
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                    color: Colors.white38,
+                    size: 20,
+                  ),
+                  onPressed: () =>
+                      setState(() => _obscureKey = !_obscureKey),
                 ),
               ),
             ),
             const SizedBox(height: 16),
-          ],
-
-          // URL
-          _label('TU_SUPABASE_URL'),
-          TextField(
-            controller: _urlCtrl,
-            style: const TextStyle(color: Colors.white, fontSize: 14),
-            decoration: _inputDeco('https://xxxx.supabase.co'),
-          ),
-          const SizedBox(height: 12),
-
-          // ANON KEY
-          _label('TU_SUPABASE_ANON_KEY'),
-          TextField(
-            controller: _keyCtrl,
-            style: const TextStyle(color: Colors.white, fontSize: 14),
-            decoration: _inputDeco('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'),
-            obscureText: true,
-          ),
-          const SizedBox(height: 20),
-
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _saving ? null : _saveAndTest,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _kAccent,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: _saving
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: _saving ? null : _saveAndTest,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _kAccent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: _saving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Text(
+                            _hasCreds ? 'Actualizar' : 'Activar',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
-                        )
-                      : Text(_hasCreds ? 'Actualizar credenciales' : 'Activar Supabase'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                onPressed: _testing ? null : _testConnection,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white70,
-                  side: const BorderSide(color: Colors.white24),
-                ),
-                child: _testing
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Probar'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              TextButton(
-                onPressed: _showSqlStructure,
-                child: const Text(
-                  'Ver estructura SQL de tablas',
-                  style: TextStyle(color: _kAccent, fontSize: 13),
-                ),
-              ),
-              const Spacer(),
-              if (_hasCreds)
-                TextButton(
-                  onPressed: _clear,
-                  child: const Text(
-                    'Desactivar Supabase',
-                    style: TextStyle(color: Colors.redAccent, fontSize: 13),
                   ),
                 ),
-            ],
-          ),
-
-          if (_statusMsg != null) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _testing ? null : _testConnection,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      side: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.15),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: _testing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Probar'),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 8),
-            Text(_statusMsg!, style: TextStyle(color: _statusColor, fontSize: 13)),
-          ],
-
-          const Divider(color: Colors.white12, height: 32),
-
-          // Vincular TV
-          const Text(
-            'Vincular TV por código',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
+            Row(
+              children: [
+                TextButton(
+                  onPressed: _showSqlStructure,
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white54,
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                  ),
+                  child: const Text(
+                    'Ver SQL',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ),
+                const Spacer(),
+                if (_hasCreds)
+                  TextButton(
+                    onPressed: _clear,
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.redAccent.withValues(alpha: 0.85),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                    ),
+                    child: const Text(
+                      'Desactivar',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ),
+              ],
             ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'En la TV genera un código. Escríbelo aquí para enviar tus credenciales. '
-            'La TV pasará a usar tu proyecto Supabase y sus perfiles.',
-            style: TextStyle(color: Colors.white38, fontSize: 12),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _codeCtrl,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              letterSpacing: 8,
-              fontWeight: FontWeight.bold,
-            ),
-            textAlign: TextAlign.center,
-            keyboardType: TextInputType.number,
-            maxLength: 6,
-            decoration: _inputDeco('000000').copyWith(counterText: ''),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _saving ? null : _linkCode,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF7B5CFF),
-                foregroundColor: Colors.white,
+            if (_statusMsg != null) ...[
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: _statusColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _statusColor.withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Text(
+                  _statusMsg!,
+                  style: TextStyle(color: _statusColor, fontSize: 12.5),
+                ),
               ),
-              child: const Text('Vincular código a este dispositivo'),
+            ],
+          ],
+        ),
+
+        const SizedBox(height: 16),
+
+        // ── Vincular TV ──────────────────────────────────────────────
+        _SectionCard(
+          title: 'Vincular TV',
+          subtitle: 'Escribe el código que muestra la TV',
+          children: [
+            TextField(
+              controller: _codeCtrl,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 26,
+                letterSpacing: 10,
+                fontWeight: FontWeight.w700,
+              ),
+              textAlign: TextAlign.center,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: _deco('000000').copyWith(
+                counterText: '',
+                contentPadding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _saving ? null : _linkCode,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white.withValues(alpha: 0.1),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(
+                      color: Colors.white.withValues(alpha: 0.12),
+                    ),
+                  ),
+                ),
+                child: const Text(
+                  'Vincular a este dispositivo',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'La TV pasará a usar tu proyecto y perfiles.',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.35),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _fieldLabel(String t) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Text(
+          t,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.45),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+
+  InputDecoration _deco(String hint) => InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(
+          color: Colors.white.withValues(alpha: 0.2),
+          fontSize: 13,
+        ),
+        filled: true,
+        fillColor: _kBgField,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: _kBorder),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: _kAccent.withValues(alpha: 0.5)),
+        ),
+      );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Piezas de UI
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _StatusHeader extends StatelessWidget {
+  final bool isActive;
+  final bool hasCreds;
+  final String? userName;
+
+  const _StatusHeader({
+    required this.isActive,
+    required this.hasCreds,
+    this.userName,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color dot;
+    final String label;
+    final String hint;
+
+    if (isActive) {
+      dot = const Color(0xFF4ADE80);
+      label = 'Activo';
+      hint = userName != null ? 'Perfil · $userName' : 'Sincronización en la nube';
+    } else if (hasCreds) {
+      dot = Colors.orangeAccent;
+      label = 'Credenciales guardadas';
+      hint = 'Falta elegir un perfil';
+    } else {
+      dot = Colors.white38;
+      label = 'No configurado';
+      hint = 'La app usa solo el caché del dispositivo';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _kCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kBorder),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: dot,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: dot.withValues(alpha: 0.45),
+                  blurRadius: 8,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  hint,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.45),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _label(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Text(
-          text,
-          style: const TextStyle(color: Colors.white54, fontSize: 12),
-        ),
-      );
+class _SectionCard extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final List<Widget> children;
 
-  InputDecoration _inputDeco(String hint) => InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
-        filled: true,
-        fillColor: const Color(0xFF1a1a2e),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
+  const _SectionCard({
+    required this.title,
+    this.subtitle,
+    required this.children,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: _kCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              subtitle!,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.4),
+                fontSize: 12,
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          ...children,
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _ActionRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: Colors.white70, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.4),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: Colors.white.withValues(alpha: 0.3),
+              ),
+            ],
+          ),
         ),
-      );
+      ),
+    );
+  }
 }

@@ -456,7 +456,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     final pos = _currentPosition.inMilliseconds / 1000.0;
     final inInterval = pos >= _introStartSec! && pos <= _introEndSec!;
-    final visible = inInterval &&
+    final visible =
+        inInterval &&
         !_skipIntroDismissed &&
         !(_skipIntroAutoHidden && !_showControls);
     if (visible != _showSkipIntro) {
@@ -571,19 +572,46 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return h;
   }
 
+  /// True si la URL ya es stream directo (m3u8/mp4/etc) — no hace falta extraer.
+  bool _isDirectStreamUrl(String url) {
+    final u = url.toLowerCase().trim();
+    if (u.isEmpty) return false;
+    if (u.contains('.m3u8')) return true;
+    if (u.contains('.mp4')) return true;
+    if (u.contains('.mpd')) return true; // DASH
+    if (u.contains('.mkv') || u.contains('.webm')) return true;
+    // Algunos CDN sirven m3u8 sin extensión clara
+    if (u.contains('/playlist') || u.contains('format=m3u8')) return true;
+    return false;
+  }
+
   Future<void> _initializePlayer() async {
     if (_isResolving) return;
     _isResolving = true;
     _allServersFailed = false;
 
     try {
-      // 1) Si ya hay URL (p.ej. elegida en modal), usarla primero
-      String? url = widget.videoUrl.trim().isNotEmpty ? widget.videoUrl.trim() : null;
       Map<String, String> headers = {
         if (widget.headers != null) ...widget.headers!,
       };
 
-      // 2) Si no hay URL → ServerLoader (caché A → B → fetch)
+      // ─── 1) URL ya pasada (p.ej. m3u8 desde ServidoresModal) ───────────
+      final passed = widget.videoUrl.trim();
+      if (passed.isNotEmpty && _isDirectStreamUrl(passed)) {
+        // Directo al reproductor: NO resolvePlayable, NO getServers
+        debugPrint('Player: m3u8/directo recibido → play inmediato');
+        _activeUrl = passed;
+        _activeHeaders = headers;
+        _fallbackServers = [];
+        _fallbackIndex = 0;
+        await _startControllerWithUrl(passed, headers);
+        return;
+      }
+
+      // ─── 2) URL no-directa (embed) pasada: intentar usarla; fallback sí ─
+      String? url = passed.isNotEmpty ? passed : null;
+
+      // ─── 3) Sin URL → ServerLoader (caché / fuentes) ────────────────────
       if (url == null || url.isEmpty) {
         final playable = await _serverLoader.resolvePlayable(
           contentId: _resolvedId,
@@ -598,31 +626,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
           if (playable.idioma.isNotEmpty) {
             _idioma = playable.idioma.toUpperCase();
           }
+          // Si ya resolvió a m3u8, jugar directo sin armar cola pesada
+          if (_isDirectStreamUrl(url)) {
+            _activeUrl = url;
+            _activeHeaders = headers;
+            _fallbackServers = [];
+            _fallbackIndex = 0;
+            await _startControllerWithUrl(url, headers);
+            // Fallback en segundo plano por si falla después
+            unawaited(_prepareFallbackServers(url));
+            return;
+          }
         }
       }
 
-      // 3) Preparar cola de fallback (servidores del idioma preferido)
-      try {
-        final servers = await _serverLoader.getServers(
-          contentId: _resolvedId,
-          isMovie: _mediaType != 'tv',
-          season: widget.temporada ?? 0,
-          episode: widget.capitulo ?? 0,
-          context: mounted ? context : null,
-        );
-        _fallbackServers = servers;
-        // Si la URL actual está en la lista, empezar desde el siguiente en error
-        _fallbackIndex = 0;
-        if (url != null) {
-          final idx = servers.indexWhere((s) {
-            final u = s['resolved_m3u8']?.toString() ??
-                s['servidor_url']?.toString() ??
-                '';
-            return u == url;
-          });
-          if (idx >= 0) _fallbackIndex = idx;
-        }
-      } catch (_) {}
+      // ─── 4) Cola de fallback solo si NO tenemos stream directo ─────────
+      await _prepareFallbackServers(url);
 
       if (url == null || url.isEmpty) {
         if (!mounted || _isDisposing) return;
@@ -632,7 +651,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _errorMessage =
               'No se encontró ningún servidor disponible para este contenido.';
         });
-        _isResolving = false;
         return;
       }
 
@@ -645,6 +663,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } finally {
       _isResolving = false;
     }
+  }
+
+  Future<void> _prepareFallbackServers(String? currentUrl) async {
+    try {
+      final servers = await _serverLoader.getServers(
+        contentId: _resolvedId,
+        isMovie: _mediaType != 'tv',
+        season: widget.temporada ?? 0,
+        episode: widget.capitulo ?? 0,
+        context: mounted ? context : null,
+      );
+      _fallbackServers = servers;
+      _fallbackIndex = 0;
+      if (currentUrl != null) {
+        final idx = servers.indexWhere((s) {
+          final u =
+              s['resolved_m3u8']?.toString() ??
+              s['servidor_url']?.toString() ??
+              '';
+          return u == currentUrl;
+        });
+        if (idx >= 0) _fallbackIndex = idx;
+      }
+    } catch (_) {}
   }
 
   Future<void> _startControllerWithUrl(
@@ -714,11 +756,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _tryNextServer({String? reason}) async {
     if (!mounted || _isDisposing) return;
 
-    if (!mounted || _isDisposing) return;
     setState(() {
       _isLoading = true;
       _errorMessage = '';
     });
+
+    // Si llegamos con m3u8 directo y no hay cola, prepararla ahora
+    if (_fallbackServers.isEmpty) {
+      await _prepareFallbackServers(_activeUrl);
+      _fallbackIndex = -1; // se incrementa abajo
+    }
 
     // Avanzar índice
     _fallbackIndex++;
@@ -1040,7 +1087,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
             (remaining <= const Duration(minutes: 3) &&
                 remaining > const Duration(seconds: 2));
 
-        final shouldShowNext = nearEnd &&
+        final shouldShowNext =
+            nearEnd &&
             remaining > const Duration(seconds: 2) &&
             (_siguiente != null || _recomendaciones.isNotEmpty) &&
             !_nextPromptUserDismissed &&
@@ -1119,7 +1167,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _toggleControls() {
     setState(() {
       _showControls = !_showControls;
-      if (!_showControls) _showBottomPanel = false;
+      if (!_showControls) {
+        _showBottomPanel = false;
+      } else {
+        // Al mostrar controles, reaparecen skip intro / siguiente si toca
+        _maybeReshowPrompts();
+      }
     });
     if (_showControls) _scheduleHideControls();
   }
@@ -1438,8 +1491,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (_siguiente == null) return;
       final temp = _siguiente!['temporada'] as int?;
       final cap = _siguiente!['capitulo'] as int?;
-      final tituloNext = _siguiente!['titulo']?.toString() ??
-          _tituloContenido;
+      final tituloNext = _siguiente!['titulo']?.toString() ?? _tituloContenido;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -1609,7 +1661,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 maxWidth: 640,
                 verticalOffset: _subtitleVerticalOffset,
               ),
-            // ── Omitir intro (estilo Nuvio) ──────────────────────────
+            // Controles debajo; skip intro / next ENCIMA para recibir toques
+            if (!_isLoading && _errorMessage.isEmpty && _showControls)
+              _buildControlsOverlay(),
+
+            // ── Omitir intro (estilo Nuvio) — encima del overlay ─────
             if (!_isLoading && _errorMessage.isEmpty)
               Positioned(
                 right: 16,
@@ -1626,6 +1682,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   autoHideMs: 15000,
                   onTap: _skipIntro,
                   onAutoHide: () {
+                    if (!mounted || _isDisposing) return;
                     setState(() {
                       _skipIntroAutoHidden = true;
                       _showSkipIntro = false;
@@ -1634,7 +1691,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               ),
 
-            // ── Siguiente episodio / contenido (estilo Nuvio) ─────────
+            // ── Siguiente episodio — encima del overlay ──────────────
             if (!_isLoading &&
                 _errorMessage.isEmpty &&
                 (_siguiente != null || _recomendaciones.isNotEmpty))
@@ -1661,6 +1718,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     _goNextEpisode();
                   },
                   onAutoHide: () {
+                    if (!mounted || _isDisposing) return;
                     setState(() {
                       _showNextButton = false;
                       _nextPromptAutoHidden = true;
@@ -1668,9 +1726,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   },
                 ),
               ),
-
-            if (!_isLoading && _errorMessage.isEmpty && _showControls)
-              _buildControlsOverlay(),
           ],
         ),
       ),
@@ -1710,7 +1765,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline_rounded, color: netflixRed, size: 56),
+            const Icon(
+              Icons.error_outline_rounded,
+              color: netflixRed,
+              size: 56,
+            ),
             const SizedBox(height: 14),
             const Text(
               'No se pudo cargar el video',
@@ -1827,8 +1886,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         Expanded(
                           child: _mediaType == 'tv'
                               ? Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     if (_capituloFmt != null &&
                                         _capituloFmt!.isNotEmpty)
@@ -1859,17 +1917,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 )
                               // Película: solo logo; si no hay logo → título
                               : (_logoUrl == null || _logoUrl!.isEmpty)
-                                  ? Text(
-                                      _tituloContenido,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    )
-                                  : const SizedBox.shrink(),
+                              ? Text(
+                                  _tituloContenido,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                )
+                              : const SizedBox.shrink(),
                         ),
                       ],
                     ),
@@ -1893,17 +1951,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   const SizedBox(width: 8),
                   // ── BOTÓN CAST ──────────────────────────────────
                   CastButton(
-                    videoUrl:
-                        _activeUrl.isNotEmpty ? _activeUrl : widget.videoUrl,
+                    videoUrl: _activeUrl.isNotEmpty
+                        ? _activeUrl
+                        : widget.videoUrl,
                     headers: _playerHeaders(),
                     title: _tituloContenido.isNotEmpty
                         ? _tituloContenido
                         : widget.titulo,
                     accentColor: accentOrange,
+                    backdropUrl: _backdropUrl,
+                    introStartSec: _introStartSec,
+                    introEndSec: _introEndSec,
+                    // outroStartSec / outroEndSec si los tienes
+                    openCastScreenOnConnect:
+                        true, // ← abre CastScreen al conectar
                     onCastStarted: () {
-                      if (_controllerReady && _isPlaying) {
-                        _controller.pause();
-                      }
+                      if (_controllerReady && _isPlaying) _controller.pause();
                     },
                   ),
                 ],
