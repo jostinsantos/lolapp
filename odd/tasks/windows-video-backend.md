@@ -38,7 +38,7 @@ The user asked to get the Windows version running, authorized fixing Windows blo
   - Focused `flutter test test/core/video_player_backend_test.dart`: passed 2/2. Focused `flutter analyze lib/core/video_player_backend.dart test/core/video_player_backend_test.dart`: passed with no issues. Analysis including `lib/main.dart` exits 1 with 16 existing diagnostics in legacy code (warnings/info, including async-context, deprecated `withOpacity`, unused imports, and naming); no issue was reported in the helper/test.
   - `flutter build windows`: passed and produced `build\\windows\\x64\\runner\\Release\\lol.exe` using the user-provided `windows/nuget.exe` via process-local PATH. Flutter generated Windows plugin registration for `media_kit_libs_windows_video` and `media_kit_video`; CMake emitted developer warnings but no build errors.
   - Manual playback of a real TV URL was not exercised; user-side runtime confirmation remains pending.
-  - Work-unit commit identity and RDD assessment: pending.
+  - Implementation work-unit commit: `a4868953b77290361ed02f06800e9bbdf095f7cc` (`fix(windows): add video player backend`). Its RDD assessment against the last reviewed boundary `8755add3d2a99ee68f309a680b005a1d8665d7df` covers the unreviewed branch range (the earlier WebView support commit plus this backend commit): medium risk, `review_due=true`, reason `slice_budget_reached`, 695 authored changed lines, unrelated untracked files excluded. The fresh native review start is still awaiting explicit user consent; no review was started.
 
 ## Progress
 - Read-only mapping confirms `video_player_platform_interface 6.9.0` itself throws the exact reported error from its default `VideoPlayerPlatform.init()` when no implementation is registered.
@@ -49,7 +49,7 @@ The user asked to get the Windows version running, authorized fixing Windows blo
 - The regression-tested helper accepts a synchronous callback because `VideoPlayerMediaKit.ensureInitialized(windows: true)` returns `void`; the Windows plugin is registered by Flutter's generated Windows registrar.
 
 ## Next step
-Commit VPW-1 as a work unit, assess it under the native RDD gate, then record commit identity and assessment. Keep manual stream-playback confirmation explicitly pending unless the user's actual Windows app is exercised.
+Obtain explicit user consent before starting the due native review of the accumulated branch range. After the review boundary is resolved, keep manual stream-playback confirmation explicitly pending unless the user's actual Windows app is exercised.
 
 ## Relevant files
 - `lib/main.dart` — app startup, where Windows backend should initialize before `runApp`.
