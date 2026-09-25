@@ -40,6 +40,10 @@ dependencies:
   supabase_flutter: ^2.8.0
   timezone: ^0.9.4        
   flutter_foreground_task: ^8.14.0
+
+dependency_overrides:
+  media_kit_video:
+    path: packages/media_kit_video
   
 dev_dependencies:
   flutter_test:
