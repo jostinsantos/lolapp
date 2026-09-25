@@ -22,7 +22,8 @@ dependencies:
   url_launcher: ^6.3.2
   cached_network_image: ^3.3.0
   video_player: ^2.5.1
-  video_player_media_kit: ^2.0.0
+  video_player_media_kit:
+    path: packages/video_player_media_kit
   media_kit_libs_windows_video: ^1.0.11
   html: ^0.15.4
   wakelock_plus: ^1.2.8
