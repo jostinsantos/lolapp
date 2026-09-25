@@ -3,8 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:lol/data/webview/app_webview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
@@ -134,12 +133,7 @@ class _TvPlayerWebViewPageState extends State<TvPlayerWebViewPage>
         ),
       );
 
-    try {
-      final platform = _controller.platform;
-      if (platform is AndroidWebViewController) {
-        platform.setMediaPlaybackRequiresUserGesture(false);
-      }
-    } catch (_) {}
+    _controller.setMediaPlaybackRequiresUserGesture(false);
 
     _controller.loadRequest(Uri.parse(widget.url));
 

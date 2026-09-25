@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:lol/data/webview/app_webview.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:android_intent_plus/flag.dart';
@@ -566,8 +566,8 @@ class _ExtractorDownloadPageState extends State<ExtractorDownloadPage>
             if ((absUrl.includes('.m3u8') || absUrl.includes('.mp4') ||
                  absUrl.includes('.ts') || absUrl.includes('.m4s')) && !urls.has(absUrl)) {
               urls.add(absUrl);
-              if (window.MediaDetector && window.MediaDetector.postMessage) {
-                window.MediaDetector.postMessage(absUrl);
+              if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+                window.flutter_inappwebview.callHandler('MediaDetector', absUrl);
               }
             }
           } catch(e) {}

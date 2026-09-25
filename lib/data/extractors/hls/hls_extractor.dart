@@ -11,7 +11,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:lol/data/webview/app_webview.dart';
 
 // ============================================================
 //  RESULTADO Y RESOLVERS NATIVOS
@@ -1060,8 +1060,8 @@ class _HiddenProbeState extends State<_HiddenProbe> {
             if ((absUrl.includes('.m3u8') || absUrl.includes('.mp4') ||
                  absUrl.includes('.ts') || absUrl.includes('.m4s')) && !urls.has(absUrl)) {
               urls.add(absUrl);
-              if (window.MediaDetector && window.MediaDetector.postMessage) {
-                window.MediaDetector.postMessage(absUrl);
+              if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+                window.flutter_inappwebview.callHandler('MediaDetector', absUrl);
               }
             }
           } catch(e) {}

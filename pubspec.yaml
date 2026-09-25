@@ -15,8 +15,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  webview_flutter: ^4.4.0
-  webview_flutter_android: ^3.12.0
+  flutter_inappwebview: ^6.1.5
   shared_preferences: ^2.5.5
   android_intent_plus: ^5.0.2
   http: ^1.1.0
