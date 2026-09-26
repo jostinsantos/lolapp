@@ -4,8 +4,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:lol/data/webview/app_webview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// WebView móvil — estilo sobrio como TV.
@@ -126,12 +125,7 @@ class _WebPlayerViewState extends State<WebPlayerView>
         ),
       );
 
-    try {
-      final platform = _controller.platform;
-      if (platform is AndroidWebViewController) {
-        platform.setMediaPlaybackRequiresUserGesture(false);
-      }
-    } catch (_) {}
+    _controller.setMediaPlaybackRequiresUserGesture(false);
 
     final url = widget.servidorUrl.trim();
     if (url.isEmpty) {

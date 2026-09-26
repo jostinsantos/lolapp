@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:video_player_media_kit/video_player_media_kit.dart';
 
 import 'presentation/mobile/mobile_shell.dart' as mobile;
 import 'presentation/tv/tv_shell.dart' as tv;
@@ -14,6 +15,7 @@ import 'core/constants/versiones.dart'; // ← versiones centralizadas
 import 'supabase/supabase_config.dart';
 import 'supabase/supabase_client.dart';
 import 'features/profile/presentation/profile_selection_page.dart';
+import 'core/video_player_backend.dart';
 
 // Cast: botones de la notificación (play/pause/seek)
 import 'features/player/presentation/widgets/cast_manager.dart';
@@ -28,6 +30,12 @@ const String kDisclaimerKey = 'disclaimer_accepted';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  initializeVideoPlayerBackend(
+    isWindows: Platform.isWindows,
+    initializeWindowsBackend: () =>
+        VideoPlayerMediaKit.ensureInitialized(windows: true),
+  );
 
   // Notificaciones (descargas + cast)
   await NotificationHelper.init();
