@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -22,6 +23,33 @@ import '../widgets/screensaver_overlay.dart';
 import '../../../../data/datasources/remote/tmdb/tmdb_player_api.dart';
 import 'tv_player_controller.dart';
 import '../widgets/because_you_watched_overlay.dart';
+
+class TvPlayerHoverRegion extends StatelessWidget {
+  const TvPlayerHoverRegion({
+    super.key,
+    required this.enabled,
+    required this.onHoverChanged,
+    required this.child,
+  });
+
+  final bool enabled;
+  final ValueChanged<bool> onHoverChanged;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled || defaultTargetPlatform != TargetPlatform.windows) {
+      return child;
+    }
+
+    return MouseRegion(
+      onEnter: (_) => onHoverChanged(true),
+      onExit: (_) => onHoverChanged(false),
+      child: child,
+    );
+  }
+}
+
 class _SubtitleCue {
   final Duration start;
   final Duration end;
@@ -190,6 +218,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Duration _totalDuration = Duration.zero;
   String _errorMessage = '';
   bool _showControls = false;
+  (bool, bool, bool)? _controlsVisibilityBeforeHover;
   bool _isBuffering = false;
   Timer? _hideControlsTimer;
   bool _isDragging = false;
@@ -1749,7 +1778,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _hideControlsTimer?.cancel();
   }
 
-  void _showControlsOverlayNow() {
+  void _showControlsOverlayNow({bool requestFocus = true}) {
     setState(() {
       _showControls = true;
       _showToolbarOnly = false;
@@ -1772,10 +1801,36 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
     _hideToolbarOnlyTimer?.cancel();
-    _seekBarFocusNode.requestFocus();
+    if (requestFocus) _seekBarFocusNode.requestFocus();
     _scheduleHideControls();
     _resetScreensaverTimer();
     _maybeReshowNextPromptOnControls();
+  }
+
+  void _onPlayerHoverChanged(bool hovering) {
+    if (!mounted || _isDisposing) return;
+
+    if (hovering) {
+      if (_isLoading || !_controllerReady || _errorMessage.isNotEmpty) return;
+      if (_showControls && !_showToolbarOnly) return;
+      _controlsVisibilityBeforeHover = (
+        _showControls,
+        _showToolbarOnly,
+        _isControlFocused(),
+      );
+      _showControlsOverlayNow(requestFocus: false);
+      return;
+    }
+
+    final previousVisibility = _controlsVisibilityBeforeHover;
+    if (previousVisibility == null) return;
+    _controlsVisibilityBeforeHover = null;
+    if (!previousVisibility.$3 && _isControlFocused()) return;
+
+    setState(() {
+      _showControls = previousVisibility.$1;
+      _showToolbarOnly = previousVisibility.$2;
+    });
   }
 
   /// El auto-hide lo gestiona NextEpisodePrompt (barra 10s). Aquí solo re-mostrar.
@@ -3117,9 +3172,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
             }
             return KeyEventResult.ignored;
           },
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
+          child: TvPlayerHoverRegion(
+            enabled: !_isLoading && _controllerReady && _errorMessage.isEmpty,
+            onHoverChanged: _onPlayerHoverChanged,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
               Container(
                 color: Colors.black,
                 child: Center(
@@ -3314,7 +3372,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       : null,
                   optimizeTmdbUrl: _optimizeTmdbUrl,
                 ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
