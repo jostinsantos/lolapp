@@ -51,6 +51,12 @@ class HlsQualityOptionTv {
 
 /// Versión TV de ExtractorDownloadPage.
 /// Misma lógica de detección que móvil + UI con foco D-pad.
+///
+/// Navegación de foco (D-pad):
+///   Volver  → (→/↓) Calidades
+///   Calidad → ←/→ cambia de calidad, OK la selecciona, ↓ Hilos, ↑ Volver
+///   Hilos   → ←/→ resta/suma hilos (1-8), ↑ Calidades, ↓ Descargar
+///   Descargar / Abrir enlace → ↑ Hilos, ←/→ entre ambos
 class ExtractorDownloadPageTv extends StatefulWidget {
   final int idcontenido;
   final int? temporada;
@@ -116,10 +122,14 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
   Timer? _searchTimer;
   final _dm = DownloadManager.instance;
 
+  /// Hilos de descarga seleccionados (1-8)
+  int _selectedConcurrency = 4;
+
   // Foco TV
   final FocusNode _backFocus = FocusNode(debugLabel: 'ext_tv_back');
   final FocusNode _downloadFocus = FocusNode(debugLabel: 'ext_tv_dl');
   final FocusNode _idmFocus = FocusNode(debugLabel: 'ext_tv_idm');
+  final FocusNode _concurrencyFocus = FocusNode(debugLabel: 'ext_tv_threads');
   List<FocusNode> _qualityFocusNodes = [];
 
   static const _idmPackages = <String>[
@@ -134,6 +144,7 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
     WidgetsBinding.instance.addObserver(this);
     initialUrl = widget.servidorUrl.trim();
     _hostKey = _extractHost(initialUrl);
+    _selectedConcurrency = _dm.segmentConcurrency.clamp(1, 8);
     _initWebView();
     _loadHostCache().then((_) {
       if (_cachedMethod == _kMethodNative) {
@@ -153,6 +164,7 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
     _backFocus.dispose();
     _downloadFocus.dispose();
     _idmFocus.dispose();
+    _concurrencyFocus.dispose();
     for (final n in _qualityFocusNodes) {
       n.dispose();
     }
@@ -757,6 +769,9 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
     }
 
     try {
+      // Aplicar hilos seleccionados ANTES de iniciar
+      await _dm.setSegmentConcurrency(_selectedConcurrency);
+
       // Marcar cierre ANTES de navegar para no cortar detección/descarga
       _isClosing = true;
       _detectionStopped = true;
@@ -897,6 +912,419 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
     return KeyEventResult.ignored;
   }
 
+  // ─── Navegación de foco ────────────────────────────────────────────────
+  void _focusQualities() {
+    if (_qualityFocusNodes.isEmpty) {
+      _concurrencyFocus.requestFocus();
+      return;
+    }
+    // Ir a la calidad seleccionada (si existe), si no a la primera.
+    var idx = _qualities.indexWhere((q) => q.url == selectedQualityUrl);
+    if (idx < 0 || idx >= _qualityFocusNodes.length) idx = 0;
+    _qualityFocusNodes[idx].requestFocus();
+  }
+
+  void _changeThreads(int delta) {
+    final next = (_selectedConcurrency + delta).clamp(1, 8);
+    if (next != _selectedConcurrency) {
+      setState(() => _selectedConcurrency = next);
+    }
+  }
+
+  // ─── UI ────────────────────────────────────────────────────────────────
+  Widget _buildHeader(String subtitle) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
+      child: Row(
+        children: [
+          Focus(
+            focusNode: _backFocus,
+            onKeyEvent: (node, event) {
+              if (event is! KeyDownEvent) return KeyEventResult.ignored;
+              final key = event.logicalKey;
+              if (key == LogicalKeyboardKey.select ||
+                  key == LogicalKeyboardKey.enter) {
+                _goBack();
+                return KeyEventResult.handled;
+              }
+              if (key == LogicalKeyboardKey.arrowRight ||
+                  key == LogicalKeyboardKey.arrowDown) {
+                if (_qualityFocusNodes.isNotEmpty) {
+                  _focusQualities();
+                } else {
+                  _concurrencyFocus.requestFocus();
+                }
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            },
+            child: Builder(
+              builder: (ctx) {
+                final hasFocus = Focus.of(ctx).hasFocus;
+                return GestureDetector(
+                  onTap: _goBack,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 140),
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: hasFocus
+                          ? Colors.white.withValues(alpha: 0.18)
+                          : Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: hasFocus ? Colors.white : Colors.transparent,
+                        width: 2,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.arrow_back_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.titulo,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.55),
+                    fontSize: 12,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQualityChip(int i) {
+    final q = _qualities[i];
+    final selected = q.url == selectedQualityUrl;
+    return Focus(
+      focusNode: _qualityFocusNodes[i],
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        final key = event.logicalKey;
+        if (key == LogicalKeyboardKey.select ||
+            key == LogicalKeyboardKey.enter) {
+          _selectQuality(q);
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowRight) {
+          if (i < _qualityFocusNodes.length - 1) {
+            _qualityFocusNodes[i + 1].requestFocus();
+          }
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowLeft) {
+          if (i > 0) {
+            _qualityFocusNodes[i - 1].requestFocus();
+          } else {
+            _backFocus.requestFocus();
+          }
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowDown) {
+          _concurrencyFocus.requestFocus();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowUp) {
+          _backFocus.requestFocus();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Builder(
+        builder: (ctx) {
+          final hasFocus = Focus.of(ctx).hasFocus;
+          return GestureDetector(
+            onTap: () => _selectQuality(q),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: selected
+                    ? _kAccent.withValues(alpha: 0.25)
+                    : Colors.white.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: hasFocus
+                      ? Colors.white
+                      : (selected ? _kAccent : Colors.transparent),
+                  width: hasFocus ? 2 : 1.3,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    q.label,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: selected || hasFocus
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                    ),
+                  ),
+                  if (q.sizeLabel != null)
+                    Text(
+                      q.sizeLabel!,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.5),
+                        fontSize: 11,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Selector de hilos SIN Slider (el Slider roba el foco y atrapa el D-pad).
+  /// ←/→ restan/suman, ↑ sube a calidades, ↓ baja a Descargar.
+  Widget _buildThreadsSelector() {
+    return Focus(
+      focusNode: _concurrencyFocus,
+      onKeyEvent: (node, event) {
+        // Permitir mantener presionado para subir/bajar rápido
+        if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+          return KeyEventResult.ignored;
+        }
+        final key = event.logicalKey;
+        if (key == LogicalKeyboardKey.arrowRight) {
+          _changeThreads(1);
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowLeft) {
+          _changeThreads(-1);
+          return KeyEventResult.handled;
+        }
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        if (key == LogicalKeyboardKey.arrowDown) {
+          _downloadFocus.requestFocus();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowUp) {
+          if (_qualityFocusNodes.isNotEmpty) {
+            _focusQualities();
+          } else {
+            _backFocus.requestFocus();
+          }
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Builder(
+        builder: (ctx) {
+          final hasFocus = Focus.of(ctx).hasFocus;
+          return GestureDetector(
+            onTap: () {},
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: hasFocus
+                    ? _kAccent.withValues(alpha: 0.16)
+                    : Colors.white.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: hasFocus ? Colors.white : Colors.transparent,
+                  width: 2,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.chevron_left_rounded,
+                    color: hasFocus ? Colors.white : Colors.white24,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    width: 34,
+                    child: Text(
+                      '$_selectedConcurrency',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: hasFocus ? _kAccent : Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  // Barra segmentada 1-8 (solo visual, no enfocable)
+                  ...List.generate(8, (i) {
+                    final on = i < _selectedConcurrency;
+                    return Container(
+                      width: 22,
+                      height: 8,
+                      margin: const EdgeInsets.only(right: 4),
+                      decoration: BoxDecoration(
+                        color: on ? _kAccent : Colors.white24,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    );
+                  }),
+                  const SizedBox(width: 2),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: hasFocus ? Colors.white : Colors.white24,
+                    size: 22,
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildReady() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 6, 24, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: _kGreen, size: 18),
+              const SizedBox(width: 6),
+              const Text(
+                'Fuente lista',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (_loadingQualities) ...[
+                const SizedBox(width: 12),
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: _kGreen,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Cargando calidades…',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.5),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Calidad',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (_qualitiesLoaded)
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: List.generate(_qualities.length, _buildQualityChip),
+            ),
+          const SizedBox(height: 16),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              const Text(
+                'Hilos de descarga',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                '← → para cambiar · más hilos = más rápido',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.4),
+                  fontSize: 11.5,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _buildThreadsSelector(),
+          const Spacer(),
+          Row(
+            children: [
+              Expanded(
+                child: _TvActionButton(
+                  focusNode: _downloadFocus,
+                  label: 'Descargar',
+                  icon: Icons.download_rounded,
+                  primary: true,
+                  onTap: _onDirectDownload,
+                  onUp: () => _concurrencyFocus.requestFocus(),
+                  onRight: () => _idmFocus.requestFocus(),
+                  onLeft: null,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _TvActionButton(
+                  focusNode: _idmFocus,
+                  label: 'Abrir enlace',
+                  icon: Icons.open_in_new_rounded,
+                  primary: false,
+                  onTap: _onIdmDownload,
+                  onUp: () => _concurrencyFocus.requestFocus(),
+                  onLeft: () => _downloadFocus.requestFocus(),
+                  onRight: null,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final subtitle = (widget.temporada != null && widget.capitulo != null)
@@ -917,94 +1345,7 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Header
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                  child: Row(
-                    children: [
-                      Focus(
-                        focusNode: _backFocus,
-                        onKeyEvent: (node, event) {
-                          if (event is! KeyDownEvent) {
-                            return KeyEventResult.ignored;
-                          }
-                          final key = event.logicalKey;
-                          if (key == LogicalKeyboardKey.select ||
-                              key == LogicalKeyboardKey.enter) {
-                            _goBack();
-                            return KeyEventResult.handled;
-                          }
-                          if (key == LogicalKeyboardKey.arrowRight ||
-                              key == LogicalKeyboardKey.arrowDown) {
-                            if (_qualities.isNotEmpty) {
-                              _qualityFocusNodes.first.requestFocus();
-                            } else {
-                              _downloadFocus.requestFocus();
-                            }
-                            return KeyEventResult.handled;
-                          }
-                          return KeyEventResult.ignored;
-                        },
-                        child: Builder(
-                          builder: (ctx) {
-                            final hasFocus = Focus.of(ctx).hasFocus;
-                            return GestureDetector(
-                              onTap: _goBack,
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 140),
-                                width: 48,
-                                height: 48,
-                                decoration: BoxDecoration(
-                                  color: hasFocus
-                                      ? Colors.white.withValues(alpha: 0.18)
-                                      : Colors.white.withValues(alpha: 0.08),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: hasFocus
-                                        ? Colors.white
-                                        : Colors.transparent,
-                                    width: 2.2,
-                                  ),
-                                ),
-                                child: const Icon(
-                                  Icons.arrow_back_rounded,
-                                  color: Colors.white,
-                                  size: 24,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              widget.titulo,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.w700,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              subtitle,
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.55),
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                _buildHeader(subtitle),
 
                 // WebView oculto para detección
                 Offstage(
@@ -1023,19 +1364,19 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               SizedBox(
-                                width: 48,
-                                height: 48,
+                                width: 36,
+                                height: 36,
                                 child: CircularProgressIndicator(
                                   color: _kAccent,
                                   strokeWidth: 3,
                                 ),
                               ),
-                              SizedBox(height: 20),
+                              SizedBox(height: 14),
                               Text(
                                 'Buscando fuente para descargar…',
                                 style: TextStyle(
                                   color: Colors.white70,
-                                  fontSize: 16,
+                                  fontSize: 14,
                                 ),
                               ),
                             ],
@@ -1048,259 +1389,11 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
                                     'No se encontró fuente descargable',
                                 style: const TextStyle(
                                   color: Colors.white70,
-                                  fontSize: 16,
+                                  fontSize: 14,
                                 ),
                               ),
                             )
-                          : Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(28, 12, 28, 20),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.check_circle_rounded,
-                                        color: _kGreen,
-                                        size: 22,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      const Text(
-                                        'Fuente lista',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      if (_loadingQualities) ...[
-                                        const SizedBox(width: 14),
-                                        const SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: _kGreen,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          'Cargando calidades…',
-                                          style: TextStyle(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.5),
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  const Text(
-                                    'Calidad',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  if (_qualitiesLoaded)
-                                    Wrap(
-                                      spacing: 12,
-                                      runSpacing: 10,
-                                      children: List.generate(
-                                        _qualities.length,
-                                        (i) {
-                                          final q = _qualities[i];
-                                          final selected =
-                                              q.url == selectedQualityUrl;
-                                          return Focus(
-                                            focusNode: _qualityFocusNodes[i],
-                                            onKeyEvent: (node, event) {
-                                              if (event is! KeyDownEvent) {
-                                                return KeyEventResult.ignored;
-                                              }
-                                              final key = event.logicalKey;
-                                              if (key ==
-                                                      LogicalKeyboardKey
-                                                          .select ||
-                                                  key ==
-                                                      LogicalKeyboardKey
-                                                          .enter) {
-                                                _selectQuality(q);
-                                                return KeyEventResult.handled;
-                                              }
-                                              if (key ==
-                                                  LogicalKeyboardKey
-                                                      .arrowRight) {
-                                                if (i <
-                                                    _qualityFocusNodes
-                                                            .length -
-                                                        1) {
-                                                  _qualityFocusNodes[i + 1]
-                                                      .requestFocus();
-                                                }
-                                                return KeyEventResult.handled;
-                                              }
-                                              if (key ==
-                                                  LogicalKeyboardKey
-                                                      .arrowLeft) {
-                                                if (i > 0) {
-                                                  _qualityFocusNodes[i - 1]
-                                                      .requestFocus();
-                                                } else {
-                                                  _backFocus.requestFocus();
-                                                }
-                                                return KeyEventResult.handled;
-                                              }
-                                              if (key ==
-                                                  LogicalKeyboardKey
-                                                      .arrowDown) {
-                                                _downloadFocus.requestFocus();
-                                                return KeyEventResult.handled;
-                                              }
-                                              if (key ==
-                                                  LogicalKeyboardKey.arrowUp) {
-                                                _backFocus.requestFocus();
-                                                return KeyEventResult.handled;
-                                              }
-                                              return KeyEventResult.ignored;
-                                            },
-                                            child: Builder(
-                                              builder: (ctx) {
-                                                final hasFocus =
-                                                    Focus.of(ctx).hasFocus;
-                                                return GestureDetector(
-                                                  onTap: () =>
-                                                      _selectQuality(q),
-                                                  child: AnimatedContainer(
-                                                    duration: const Duration(
-                                                        milliseconds: 140),
-                                                    padding:
-                                                        const EdgeInsets
-                                                            .symmetric(
-                                                      horizontal: 18,
-                                                      vertical: 12,
-                                                    ),
-                                                    decoration: BoxDecoration(
-                                                      color: selected
-                                                          ? _kAccent
-                                                              .withValues(
-                                                                  alpha: 0.25)
-                                                          : Colors.white
-                                                              .withValues(
-                                                                  alpha:
-                                                                      0.06),
-                                                      borderRadius:
-                                                          BorderRadius
-                                                              .circular(12),
-                                                      border: Border.all(
-                                                        color: hasFocus
-                                                            ? Colors.white
-                                                            : (selected
-                                                                ? _kAccent
-                                                                : Colors
-                                                                    .transparent),
-                                                        width: hasFocus
-                                                            ? 2.2
-                                                            : 1.4,
-                                                      ),
-                                                    ),
-                                                    child: Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        Text(
-                                                          q.label,
-                                                          style: TextStyle(
-                                                            color:
-                                                                Colors.white,
-                                                            fontSize: 15,
-                                                            fontWeight: selected ||
-                                                                    hasFocus
-                                                                ? FontWeight
-                                                                    .w700
-                                                                : FontWeight
-                                                                    .w500,
-                                                          ),
-                                                        ),
-                                                        if (q.sizeLabel !=
-                                                            null)
-                                                          Text(
-                                                            q.sizeLabel!,
-                                                            style: TextStyle(
-                                                              color: Colors
-                                                                  .white
-                                                                  .withValues(
-                                                                      alpha:
-                                                                          0.5),
-                                                              fontSize: 12,
-                                                            ),
-                                                          ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                );
-                                              },
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  const Spacer(),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: _TvActionButton(
-                                          focusNode: _downloadFocus,
-                                          label: 'Descargar',
-                                          icon: Icons.download_rounded,
-                                          primary: true,
-                                          onTap: _onDirectDownload,
-                                          onUp: () {
-                                            if (_qualityFocusNodes
-                                                .isNotEmpty) {
-                                              _qualityFocusNodes.first
-                                                  .requestFocus();
-                                            } else {
-                                              _backFocus.requestFocus();
-                                            }
-                                          },
-                                          onRight: () =>
-                                              _idmFocus.requestFocus(),
-                                          onLeft: null,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 14),
-                                      Expanded(
-                                        child: _TvActionButton(
-                                          focusNode: _idmFocus,
-                                          label: 'Abrir enlace',
-                                          icon: Icons.open_in_new_rounded,
-                                          primary: false,
-                                          onTap: _onIdmDownload,
-                                          onUp: () {
-                                            if (_qualityFocusNodes
-                                                .isNotEmpty) {
-                                              _qualityFocusNodes.first
-                                                  .requestFocus();
-                                            } else {
-                                              _backFocus.requestFocus();
-                                            }
-                                          },
-                                          onLeft: () =>
-                                              _downloadFocus.requestFocus(),
-                                          onRight: null,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
+                          : _buildReady(),
                 ),
               ],
             ),
@@ -1367,34 +1460,31 @@ class _TvActionButton extends StatelessWidget {
             onTap: onTap,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 140),
-              height: 52,
+              height: 44,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: primary
-                    ? (hasFocus
-                        ? _kAccent
-                        : _kAccent.withValues(alpha: 0.85))
+                    ? (hasFocus ? _kAccent : _kAccent.withValues(alpha: 0.85))
                     : (hasFocus
                         ? Colors.white.withValues(alpha: 0.16)
                         : Colors.white.withValues(alpha: 0.08)),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: hasFocus ? Colors.white : Colors.transparent,
-                  width: 2.2,
+                  width: 2,
                 ),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(icon, color: Colors.white, size: 22),
-                  const SizedBox(width: 10),
+                  Icon(icon, color: Colors.white, size: 20),
+                  const SizedBox(width: 8),
                   Text(
                     label,
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 16,
-                      fontWeight:
-                          hasFocus ? FontWeight.w700 : FontWeight.w600,
+                      fontSize: 14,
+                      fontWeight: hasFocus ? FontWeight.w700 : FontWeight.w600,
                     ),
                   ),
                 ],

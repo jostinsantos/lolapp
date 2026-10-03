@@ -1,18 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
 import 'download_manager.dart';
 import 'local_player_page.dart';
 
 const _kAccent = Color(0xFFE50914);
 const _kCard = Color(0xFF1C1C1E);
 
-/// Página de descargas TV — layout 100 % vertical + foco D-pad.
-/// Hereda el foco del menú lateral mediante [onRequestMenuFocus] y
-/// [onMainFocusNodeCreated].
+/// Página de descargas TV — layout 100 % landscape + foco D-pad.
+/// Siempre fuerza orientación horizontal para evitar que se ponga vertical
+/// al volver del player o del extractor.
 class DescargasPageTv extends StatefulWidget {
   final VoidCallback? onRequestMenuFocus;
   final ValueChanged<FocusNode>? onMainFocusNodeCreated;
@@ -27,7 +25,8 @@ class DescargasPageTv extends StatefulWidget {
   State<DescargasPageTv> createState() => _DescargasPageTvState();
 }
 
-class _DescargasPageTvState extends State<DescargasPageTv> {
+class _DescargasPageTvState extends State<DescargasPageTv>
+    with WidgetsBindingObserver {
   final _dm = DownloadManager.instance;
   final FocusNode _rootFocus = FocusNode(debugLabel: 'descargas_tv_root');
   final ScrollController _scrollCtrl = ScrollController();
@@ -42,16 +41,15 @@ class _DescargasPageTvState extends State<DescargasPageTv> {
   @override
   void initState() {
     super.initState();
-    // Forzar orientación libre (TV) — no heredar lock de player horizontal
-    SystemChrome.setPreferredOrientations(const [
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
+    WidgetsBinding.instance.addObserver(this);
+
+    // FORZAR SIEMPRE LANDSCAPE — nunca permitir vertical en TV
+    _forceLandscape();
+
     _dm.addListener(_onDm);
     _dm.loadSettings();
     _loadDownloads();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.onMainFocusNodeCreated?.call(_rootFocus);
       _rootFocus.requestFocus();
@@ -60,6 +58,7 @@ class _DescargasPageTvState extends State<DescargasPageTv> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _dm.removeListener(_onDm);
     _rootFocus.dispose();
     _scrollCtrl.dispose();
@@ -70,6 +69,22 @@ class _DescargasPageTvState extends State<DescargasPageTv> {
       n.dispose();
     }
     super.dispose();
+  }
+
+  /// Fuerza orientación horizontal (izquierda + derecha).
+  void _forceLandscape() {
+    SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Cada vez que la app vuelve al primer plano, re-forzamos landscape
+    if (state == AppLifecycleState.resumed) {
+      _forceLandscape();
+    }
   }
 
   void _onDm() {
@@ -106,6 +121,7 @@ class _DescargasPageTvState extends State<DescargasPageTv> {
                   as Map<String, dynamic>;
             } catch (_) {}
           }
+
           // Preferir playlist.m3u8 (HLS completo). Nunca un .ts suelto.
           String? videoPath;
           final playlist = File('${entity.path}/playlist.m3u8');
@@ -126,9 +142,11 @@ class _DescargasPageTvState extends State<DescargasPageTv> {
             }
           }
           if (videoPath == null) continue;
+
           final title = (meta?['titulo']?.toString().trim().isNotEmpty == true)
               ? meta!['titulo'].toString().trim()
               : entity.path.split(Platform.pathSeparator).last;
+
           list.add(_TvDlItem(
             folderPath: entity.path,
             videoPath: videoPath,
@@ -147,18 +165,24 @@ class _DescargasPageTvState extends State<DescargasPageTv> {
           ));
         }
       }
+
       list.sort((a, b) => b.title.compareTo(a.title));
+
       if (!mounted) return;
+
       for (final n in _itemNodes) {
         n.dispose();
       }
       _itemNodes =
           List.generate(list.length, (i) => FocusNode(debugLabel: 'dl_$i'));
+
       setState(() {
         _items = list;
         _loading = false;
       });
+
       _resyncActiveNodes();
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_activeNodes.isNotEmpty) {
           _activeNodes.first.requestFocus();
@@ -189,6 +213,8 @@ class _DescargasPageTvState extends State<DescargasPageTv> {
   }
 
   void _playLocal(_TvDlItem item) {
+    // Antes de ir al player también aseguramos landscape
+    _forceLandscape();
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => LocalPlayerScreen(
@@ -196,7 +222,10 @@ class _DescargasPageTvState extends State<DescargasPageTv> {
           title: item.title,
         ),
       ),
-    );
+    ).then((_) {
+      // Al volver del player → forzar landscape de nuevo
+      if (mounted) _forceLandscape();
+    });
   }
 
   Future<void> _deleteItem(_TvDlItem item) async {
@@ -262,12 +291,10 @@ class _DescargasPageTvState extends State<DescargasPageTv> {
 
   @override
   Widget build(BuildContext context) {
-    final active = _downloading;
+    // Re-forzar landscape en cada rebuild por si acaso
+    _forceLandscape();
 
-    // Una sola lista vertical: activas + completadas
-    final sectionActive = active.isNotEmpty ? 1 + active.length : 0;
-    // header "Completadas" + items
-    final totalSlivers = 2 + sectionActive + (_items.isEmpty ? 1 : _items.length);
+    final active = _downloading;
 
     return Focus(
       focusNode: _rootFocus,
@@ -295,10 +322,10 @@ class _DescargasPageTvState extends State<DescargasPageTv> {
                             )
                           : ListView(
                               controller: _scrollCtrl,
-                              // Layout vertical obligatorio
+                              // Lista vertical de tarjetas (correcto en landscape)
                               scrollDirection: Axis.vertical,
                               children: [
-                                // ── En curso (vertical) ──────────────────
+                                // ── En curso ──────────────────────────────
                                 if (active.isNotEmpty) ...[
                                   const Text(
                                     'En curso',
@@ -461,7 +488,6 @@ class _DescargasPageTvState extends State<DescargasPageTv> {
                                   ),
                                 ),
                                 const SizedBox(height: 10),
-
                                 if (_items.isEmpty)
                                   Padding(
                                     padding: const EdgeInsets.only(top: 24),

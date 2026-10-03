@@ -34,6 +34,7 @@ class _LocalPlayerScreenState extends State<LocalPlayerScreen> {
   @override
   void initState() {
     super.initState();
+    // Durante la reproducción siempre landscape (móvil y TV)
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
@@ -87,7 +88,8 @@ class _LocalPlayerScreenState extends State<LocalPlayerScreen> {
       // Fallback: si networkUrl falla con m3u8, probar file()
       if (widget.playlistPath.toLowerCase().endsWith('.m3u8')) {
         try {
-          final controller = VideoPlayerController.file(File(widget.playlistPath));
+          final controller =
+              VideoPlayerController.file(File(widget.playlistPath));
           await controller.initialize();
           controller.addListener(_onPlayerUpdate);
           await controller.play();
@@ -205,7 +207,14 @@ class _LocalPlayerScreenState extends State<LocalPlayerScreen> {
     _controller?.dispose();
     _rootFocus.dispose();
     WakelockPlus.disable();
-    SystemChrome.setPreferredOrientations([
+
+    // ⚠️ IMPORTANTE: NO forzar portrait.
+    // Dejamos todas las orientaciones disponibles.
+    // - En móvil las páginas normales pueden rotar.
+    // - En TV, DescargasPageTv (y el resto de páginas TV) vuelven a forzar landscape.
+    SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
@@ -343,7 +352,8 @@ class _LocalPlayerScreenState extends State<LocalPlayerScreen> {
                                     IconButton(
                                       icon: const Icon(Icons.arrow_back,
                                           color: Colors.white),
-                                      onPressed: () => Navigator.pop(context),
+                                      onPressed: () =>
+                                          Navigator.pop(context),
                                     ),
                                     Expanded(
                                       child: Text(

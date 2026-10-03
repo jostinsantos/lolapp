@@ -1116,7 +1116,7 @@ class _PageContenidoState extends State<PageContenido>
     }
     String videoUrl = '';
     String? idioma;
-    Map<String, String>? headers; // ← nuevo
+    Map<String, String>? headers;
     try {
       final loader = ServerLoader();
       final playable = await loader.resolvePlayable(
@@ -1129,7 +1129,7 @@ class _PageContenidoState extends State<PageContenido>
       if (playable != null && playable.url.isNotEmpty) {
         videoUrl = playable.url;
         idioma = playable.idioma;
-        headers = playable.headers; // ← nuevo
+        headers = playable.headers;
       }
     } catch (e) {
       debugPrint('ServerLoader precarga TV: $e');
@@ -1176,7 +1176,7 @@ class _PageContenidoState extends State<PageContenido>
           tipo: tipo,
           titulo: titulo,
           idioma: idioma,
-          headers: headers, // ← nuevo
+          headers: headers,
         ),
       ),
     );
@@ -1514,17 +1514,12 @@ class _PageContenidoState extends State<PageContenido>
                                 restartFocusNode: _restartFocusNode,
                                 letterboxdFocusNode: _letterboxdFocusNode,
                                 isSaved: isSaved,
-                                onDownload: () {
-                                  if (isMovie) {
-                                    _startDownload();
-                                  } else {
-                                    final temp = currentSeasonNumber;
-                                    final cap = currentEpisodes.isNotEmpty
-                                        ? (currentEpisodes.first['episode_number'] as num?)?.toInt() ?? 1
-                                        : 1;
-                                    _startDownload(temporada: temp, capitulo: cap);
-                                  }
-                                },
+                                // Solo descarga en películas (no en series)
+                                onDownload: isMovie
+                                    ? () {
+                                        _startDownload();
+                                      }
+                                    : null,
                                 showLetterboxd: canShowLetterboxd,
                                 onPlay: () {
                                   if (isMovie) {
@@ -1786,10 +1781,7 @@ class _PageContenidoState extends State<PageContenido>
       await _openServidores(temporada: temporada, capitulo: capitulo);
     }
   }
-
-
 }
-
 
 /// Spinner de "buscando servidor" mostrado mientras ServerLoader resuelve
 /// la fuente de video. Evita que la app parezca congelada.
@@ -2289,6 +2281,7 @@ class _InfoColumn extends StatelessWidget {
 /// - OK/Enter o flecha abajo selecciona la temporada enfocada y entra a sus capítulos.
 /// - Al entrar a la vista, el foco va a la temporada + capítulo más reciente según historial.
 /// - Desde un capítulo, flecha abajo abre recomendaciones.
+/// - En un capítulo: OK corto (al soltar) reproduce; OK mantenido abre el modal de descarga.
 class _EpisodesBottomPanel extends StatefulWidget {
   final List<Map<String, dynamic>> seasons;
   final int selectedSeasonIndex;
@@ -2342,6 +2335,10 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
   static const double _itemExtent = _kEpisodeItemExtent;
 
   Map<String, dynamic>? _focusedEpisode;
+
+  // Control de OK: tap (al soltar) vs. mantener presionado (modal descarga)
+  bool _selectHeld = false;
+  bool _longPressFired = false;
 
   @override
   void initState() {
@@ -2740,11 +2737,47 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                           ? widget.episodeFocusNodes[index]
                           : null,
                       onKeyEvent: (node, event) {
+                        final key = event.logicalKey;
+                        final isSelectKey =
+                            key == LogicalKeyboardKey.select ||
+                            key == LogicalKeyboardKey.enter ||
+                            key == LogicalKeyboardKey.numpadEnter;
+
+                        // ---- OK / Select: tap al soltar, long-press al mantener ----
+                        if (isSelectKey) {
+                          if (event is KeyDownEvent) {
+                            _selectHeld = true;
+                            _longPressFired = false;
+                            return KeyEventResult.handled; // NO reproducir aún
+                          }
+                          if (event is KeyRepeatEvent) {
+                            if (_selectHeld &&
+                                !_longPressFired &&
+                                widget.onEpisodeLongPress != null) {
+                              _longPressFired = true;
+                              widget.onEpisodeLongPress!(itemNumber);
+                            }
+                            return KeyEventResult.handled;
+                          }
+                          if (event is KeyUpEvent) {
+                            final wasHeld = _selectHeld;
+                            final wasLong = _longPressFired;
+                            _selectHeld = false;
+                            _longPressFired = false;
+                            if (wasHeld && !wasLong) {
+                              widget.onEpisodeTap(itemNumber); // tap corto
+                            }
+                            return KeyEventResult.handled;
+                          }
+                          return KeyEventResult.ignored;
+                        }
+
+                        // ---- Resto de teclas: solo KeyDown ----
                         if (event is! KeyDownEvent) {
                           return KeyEventResult.ignored;
                         }
 
-                        if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                        if (key == LogicalKeyboardKey.arrowUp) {
                           if (widget.seasonFocusNodes.isNotEmpty) {
                             widget
                                 .seasonFocusNodes[widget.selectedSeasonIndex
@@ -2759,7 +2792,7 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                           return KeyEventResult.handled;
                         }
 
-                        if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                        if (key == LogicalKeyboardKey.arrowLeft) {
                           if (index > 0) {
                             widget.episodeFocusNodes[index - 1].requestFocus();
                             _scrollToIndex(index - 1);
@@ -2767,7 +2800,7 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                           return KeyEventResult.handled;
                         }
 
-                        if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                        if (key == LogicalKeyboardKey.arrowRight) {
                           if (index < widget.episodeFocusNodes.length - 1) {
                             widget.episodeFocusNodes[index + 1].requestFocus();
                             _scrollToIndex(index + 1);
@@ -2776,29 +2809,17 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                         }
 
                         // Flecha abajo → recomendaciones (si está disponible)
-                        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                        if (key == LogicalKeyboardKey.arrowDown) {
                           if (widget.onRequestRecommendations != null) {
                             widget.onRequestRecommendations!();
                             return KeyEventResult.handled;
                           }
-                        }
-
-                        if (event.logicalKey == LogicalKeyboardKey.select ||
-                            event.logicalKey == LogicalKeyboardKey.enter) {
-                          if (event is KeyRepeatEvent &&
-                              widget.onEpisodeLongPress != null) {
-                            widget.onEpisodeLongPress!(itemNumber);
-                            return KeyEventResult.handled;
-                          }
-                          if (event is KeyDownEvent) {
-                            widget.onEpisodeTap(itemNumber);
-                            return KeyEventResult.handled;
-                          }
                           return KeyEventResult.ignored;
                         }
-                        if ((event.logicalKey == LogicalKeyboardKey.contextMenu ||
-                                event.logicalKey == LogicalKeyboardKey.space) &&
-                            event is KeyDownEvent &&
+
+                        // Algunos mandos usan contextMenu / space como "menú"
+                        if ((key == LogicalKeyboardKey.contextMenu ||
+                                key == LogicalKeyboardKey.space) &&
                             widget.onEpisodeLongPress != null) {
                           widget.onEpisodeLongPress!(itemNumber);
                           return KeyEventResult.handled;
@@ -2815,6 +2836,11 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             if (mounted) _scrollToIndex(index);
                           });
+                        } else {
+                          // Si pierde el foco (p. ej. se abrió el modal),
+                          // reiniciar el estado del botón OK.
+                          _selectHeld = false;
+                          _longPressFired = false;
                         }
                       },
                       child: Builder(
@@ -3766,7 +3792,6 @@ class _GuestStarChip extends StatelessWidget {
   }
 }
 
-
 /// Botón de acción para modales TV (foco D-pad).
 class _TvModalAction extends StatelessWidget {
   final FocusNode focusNode;
@@ -3827,11 +3852,11 @@ class _TvModalAction extends StatelessWidget {
               decoration: BoxDecoration(
                 color: primary
                     ? (hasFocus
-                        ? kAccentColor
-                        : kAccentColor.withValues(alpha: 0.85))
+                          ? kAccentColor
+                          : kAccentColor.withValues(alpha: 0.85))
                     : (hasFocus
-                        ? Colors.white.withValues(alpha: 0.14)
-                        : Colors.white.withValues(alpha: 0.06)),
+                          ? Colors.white.withValues(alpha: 0.14)
+                          : Colors.white.withValues(alpha: 0.06)),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: hasFocus ? Colors.white : Colors.transparent,
@@ -3848,8 +3873,7 @@ class _TvModalAction extends StatelessWidget {
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 15,
-                      fontWeight:
-                          hasFocus ? FontWeight.w700 : FontWeight.w600,
+                      fontWeight: hasFocus ? FontWeight.w700 : FontWeight.w600,
                     ),
                   ),
                 ],
