@@ -11,7 +11,7 @@ class VersionService {
 
   // URL de tu API
   static const String apiUrl =
-      "https://www.modlyo.com/lol/versiones.php?tipo=lol";
+      "https://www.modlyo.com/lol/versiones.php?tipo=lol";   
 
   /// Obtiene la última versión de tipo "lol" desde la API
   static Future<VersionInfo?> getLatestAnimeVersion() async {
