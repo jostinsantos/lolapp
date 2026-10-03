@@ -9,12 +9,14 @@ class PlayerSection {
   final SubSize subSize;
   final SubHeight subHeight;
   final bool idmDownloadEnabled;
+  final bool miniPlayerEnabled;
 
   // Callbacks
   final ValueChanged<bool> onSubsChanged;
   final ValueChanged<SubSize> onSubSizeChanged;
   final ValueChanged<SubHeight> onSubHeightChanged;
   final ValueChanged<bool> onIdmChanged;
+  final ValueChanged<bool> onMiniPlayerChanged;
 
   PlayerSection({
     required this.refresh,
@@ -26,10 +28,25 @@ class PlayerSection {
     required this.onSubSizeChanged,
     required this.onSubHeightChanged,
     required this.onIdmChanged,
+    required this.onMiniPlayerChanged,
+    required this.miniPlayerEnabled,
   });
 
   List<Widget> build() {
     return [
+      _sectionHeader('MINI-PLAYER'),
+      _buildToggleCard(
+        title: 'Mini-player al minimizar',
+        subtitleOn: 'Al minimizar sigue reproduciendo abajo',
+        subtitleOff: 'Al salir se detiene la reproducción',
+        enabled: miniPlayerEnabled,
+        icon: Icons.picture_in_picture_alt_rounded,
+        onChanged: (v) {
+          onMiniPlayerChanged(v);
+          refresh();
+        },
+      ),
+      const SizedBox(height: 16),
       _sectionHeader('SUBTÍTULOS'),
       _buildToggleCard(
         title: 'Subtítulos al iniciar',

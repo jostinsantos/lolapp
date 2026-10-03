@@ -154,4 +154,28 @@ class CommunityService {
     }
     return out;
   }
+
+  // ── TV Channels (topic oficial: lol-tvchanel) ──
+
+  static const topicTvChanel = 'lol-tvchanel';
+  static const topicTvChanelAlt = [
+    'lol_tvchanel',
+    'lol-addon-tvchanel',
+    'lol-addon-tv-channels',
+  ];
+
+  /// Sin seeds por defecto: solo repos de la comunidad (topic lol-tvchanel).
+  List<CommunityAddonItem> recommendedTv() => const [];
+
+  Future<List<CommunityAddonItem>> fetchTvChanelAddons() async {
+    try {
+      return await _fetchTopics(
+        [topicTvChanel, ...topicTvChanelAlt],
+        type: 'tvchanel',
+      );
+    } catch (e) {
+      debugPrint('[Community] fetchTvChanelAddons: $e');
+      return const [];
+    }
+  }
 }

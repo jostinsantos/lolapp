@@ -1050,11 +1050,22 @@ class ActualizacionesTabState extends State<ActualizacionesTab>
                             width: 28,
                             height: 28,
                             fit: BoxFit.contain,
+                            gaplessPlayback: true,
                             errorBuilder: (_, __, ___) => Icon(
                               Icons.link_rounded,
                               color: s.color,
                               size: 26,
                             ),
+                            frameBuilder: (ctx, child, frame, sync) {
+                              if (frame == null) {
+                                return Icon(
+                                  Icons.link_rounded,
+                                  color: s.color,
+                                  size: 26,
+                                );
+                              }
+                              return child;
+                            },
                           ),
                           const SizedBox(width: 14),
                           Expanded(

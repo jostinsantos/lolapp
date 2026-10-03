@@ -17,6 +17,7 @@ import 'widgets/cast_button.dart'; // ← CAST
 import 'widgets/mobile_skip_next_overlay.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_player_api.dart';
 import 'player_controller.dart'; // Módulo independiente de servidores / HLS
+import 'widgets/mini_player_service.dart';
 
 class _SubtitleCue {
   final Duration start;
@@ -1876,6 +1877,74 @@ if (passed.isNotEmpty) {
     return h > 0 ? '$h:$m:$s' : '$m:$s';
   }
 
+
+  /// Minimiza al mini-player inferior (solo móvil).
+  /// Transfiere el VideoPlayerController (handoff) para no abrir un 2º decoder.
+  Future<void> _minimizeToBar() async {
+    final mini = MiniPlayerService.instance;
+    await mini.loadPref();
+    if (!mini.enabled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Mini-player desactivado en Configuración → Player'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+    final url = _activeUrl.isNotEmpty ? _activeUrl : widget.videoUrl;
+    if (url.trim().isEmpty || !_controllerReady) return;
+
+    final wasPlaying = _controller.value.isPlaying;
+    // Guardar progreso antes de soltar el controller
+    await _saveCache();
+
+    final ctrl = _controller;
+    // Evitar que dispose() destruya el controller transferido
+    _controllerReady = false;
+    try {
+      ctrl.removeListener(_videoListener);
+    } catch (_) {}
+
+    final ok = await mini.attachController(
+      controller: ctrl,
+      url: url,
+      title: _tituloContenido.isNotEmpty ? _tituloContenido : widget.titulo,
+      idcontenido: widget.idcontenido,
+      tipo: widget.tipo,
+      poster: _backdropUrl ?? _logoUrl ?? '',
+      headers: _playerHeaders(url),
+      temporada: widget.temporada,
+      capitulo: widget.capitulo,
+      tmdbId: widget.tmdbId,
+      idioma: widget.idioma,
+      resumePlay: wasPlaying || _isPlaying,
+    );
+
+    if (!mounted) return;
+    if (ok) {
+      // No descontar mal el contador de players: dispose aún corre
+      _restoreSystemUi();
+      // Mantener wakelock mientras el mini reproduce
+      Navigator.pop(context);
+    } else {
+      // Reenganchar si falló
+      _controller = ctrl;
+      _controllerReady = true;
+      try {
+        ctrl.addListener(_videoListener);
+        if (wasPlaying) await ctrl.play();
+      } catch (_) {}
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo minimizar la reproducción')),
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
     _isDisposing = true;
@@ -2152,6 +2221,15 @@ if (passed.isNotEmpty) {
                       Icons.arrow_back_ios_new_rounded,
                       color: Colors.white,
                       size: 22,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Minimizar',
+                    onPressed: _minimizeToBar,
+                    icon: const Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: Colors.white,
+                      size: 28,
                     ),
                   ),
                   Expanded(

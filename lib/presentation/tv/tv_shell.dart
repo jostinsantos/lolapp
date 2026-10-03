@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../features/tvchanel/home/home_tvchanel_tv.dart';
 import '../shared/modals/playback_setup_modal.dart';
 import '../../core/constants/versiones.dart'; // ← VersionService + VersionInfo con URLs por ABI
 import '../../features/home/presentation/tv_home_page.dart';
@@ -25,6 +26,7 @@ import '../../features/discover/presentation/discover_page.dart';
 import '../../features/discover/presentation/tv_discover_page.dart';
 import '../../features/downloads/presentation/downloads_page_tv.dart';
 import '../../core/utils/display_refresh.dart';
+import '../../core/services/session_watch_timer.dart';
 
 const _kAccentColor = Color(0xFFE50914);
 const _kSideAccent = Color(0xFF7B5CFF);
@@ -44,20 +46,22 @@ class _MainHomeState extends State<MainHome> {
 
   final FocusNode _profileFocusNode = FocusNode(debugLabel: 'menu_perfil');
   final FocusNode _homeTabFocusNode = FocusNode(debugLabel: 'menu_home');
-  final FocusNode _descubrirTabFocusNode =
-      FocusNode(debugLabel: 'menu_descubrir');
+  final FocusNode _descubrirTabFocusNode = FocusNode(
+    debugLabel: 'menu_descubrir',
+  );
   final FocusNode _fuentesTabFocusNode = FocusNode(debugLabel: 'menu_fuentes');
   final FocusNode _searchFocusNode = FocusNode(debugLabel: 'menu_buscar');
-  final FocusNode _guardadosTabFocusNode =
-      FocusNode(debugLabel: 'menu_biblio');
-  final FocusNode _descargasTabFocusNode =
-      FocusNode(debugLabel: 'menu_descargas');
+  final FocusNode _guardadosTabFocusNode = FocusNode(debugLabel: 'menu_biblio');
+  final FocusNode _descargasTabFocusNode = FocusNode(
+    debugLabel: 'menu_descargas',
+  );
   final FocusNode _tvTabFocusNode = FocusNode(debugLabel: 'menu_tv');
   final FocusNode _settingsFocusNode = FocusNode(debugLabel: 'menu_config');
 
   // Foco del banner de actualización
-  final FocusNode _updateDownloadFocus =
-      FocusNode(debugLabel: 'update_download');
+  final FocusNode _updateDownloadFocus = FocusNode(
+    debugLabel: 'update_download',
+  );
   final FocusNode _updateCloseFocus = FocusNode(debugLabel: 'update_close');
 
   late final List<FocusNode> _menuFocusNodes;
@@ -120,8 +124,7 @@ class _MainHomeState extends State<MainHome> {
 
   static const _prefAbiKey = 'apk_preferred_abi';
 
-  bool get _showUpdateBanner =>
-      _updateAvailable && !_updateBannerDismissed;
+  bool get _showUpdateBanner => _updateAvailable && !_updateBannerDismissed;
 
   @override
   void initState() {
@@ -152,6 +155,7 @@ class _MainHomeState extends State<MainHome> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForUpdate();
       _maybeShowPlaybackSetup();
+      SessionWatchTimer.instance.start(context);
     });
   }
 
@@ -207,7 +211,8 @@ class _MainHomeState extends State<MainHome> {
         // Solo mostrar si:
         // - hay cambio de versión, O
         // - hay parche Y el usuario tiene activado recibir_parches
-        final shouldShow = status.hasVersionUpdate ||
+        final shouldShow =
+            status.hasVersionUpdate ||
             (status.hasPatchUpdate && recibirParches);
 
         if (!shouldShow) {
@@ -229,7 +234,8 @@ class _MainHomeState extends State<MainHome> {
           _urlArm64 = v.urlApkArm64;
           _urlArmeabi = v.urlApkArmeabi;
           _urlX86 = v.urlApkX86;
-          _urlUniversal = v.urlApkUniversal ??
+          _urlUniversal =
+              v.urlApkUniversal ??
               (v.urlApk.trim().isNotEmpty ? v.urlApk : null);
           _downloadUrl = v.urlApk;
           _detectedAbi = detectedAbi;
@@ -406,9 +412,7 @@ class _MainHomeState extends State<MainHome> {
 
       if (result.type != ResultType.done && mounted) {
         setState(() {
-          _downloadError = result.message.isNotEmpty
-              ? result.message
-              : 'Activa “Instalar apps desconocidas” para esta app e inténtalo de nuevo.';
+          _downloadError = result.message.isNotEmpty ? result.message : 'Activa “Instalar apps desconocidas” para esta app e inténtalo de nuevo.';
         });
       }
     } catch (e) {
@@ -857,8 +861,7 @@ class _MainHomeState extends State<MainHome> {
             ? HomePage(
                 key: _homeKey,
                 onRequestMenuFocus: _focusMenu,
-                onMainFocusNodeCreated: (node) =>
-                    _homeContentFocusNode = node,
+                onMainFocusNodeCreated: (node) => _homeContentFocusNode = node,
               )
             : const SizedBox.shrink();
       case 1:
@@ -909,10 +912,9 @@ class _MainHomeState extends State<MainHome> {
             : const SizedBox.shrink();
       case _kTvIndex:
         return _tvLoaded
-            ? TvPlaceholderPage(
+            ? HomeTvChanelTv(
                 onRequestMenuFocus: _focusMenu,
-                onMainFocusNodeCreated: (node) =>
-                    _tvContentFocusNode = node,
+                onMainFocusNodeCreated: (node) => _tvContentFocusNode = node,
               )
             : const SizedBox.shrink();
       case _kPerfilIndex:
@@ -1048,15 +1050,17 @@ class _MainHomeState extends State<MainHome> {
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 140),
                               height: 42,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 18),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                              ),
                               decoration: BoxDecoration(
                                 color: _downloading
                                     ? _kAccentColor.withValues(alpha: 0.45)
                                     : (hasFocus
-                                        ? _kAccentColor
-                                        : _kAccentColor.withValues(
-                                            alpha: 0.85)),
+                                          ? _kAccentColor
+                                          : _kAccentColor.withValues(
+                                              alpha: 0.85,
+                                            )),
                                 borderRadius: BorderRadius.circular(22),
                                 border: Border.all(
                                   color: hasFocus
@@ -1192,8 +1196,9 @@ class _MainHomeState extends State<MainHome> {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(3),
                     child: LinearProgressIndicator(
-                      value:
-                          _downloadProgress > 0.02 ? _downloadProgress : null,
+                      value: _downloadProgress > 0.02
+                          ? _downloadProgress
+                          : null,
                       backgroundColor: Colors.white12,
                       color: _kAccentColor,
                       minHeight: 3,
@@ -1232,16 +1237,26 @@ class _MainHomeState extends State<MainHome> {
                         index: () {
                           // Map logical indices to stack positions
                           switch (_currentIndex) {
-                            case 0: return 0;
-                            case 1: return 1;
-                            case 2: return 2;
-                            case 3: return 3;
-                            case 4: return 4;
-                            case 5: return 5;
-                            case 6: return 6; // perfil
-                            case 7: return 7; // descargas
-                            case 8: return 8; // tv
-                            default: return 0;
+                            case 0:
+                              return 0;
+                            case 1:
+                              return 1;
+                            case 2:
+                              return 2;
+                            case 3:
+                              return 3;
+                            case 4:
+                              return 4;
+                            case 5:
+                              return 5;
+                            case 6:
+                              return 6; // perfil
+                            case 7:
+                              return 7; // descargas
+                            case 8:
+                              return 8; // tv
+                            default:
+                              return 0;
                           }
                         }(),
                         children: [
@@ -1343,8 +1358,10 @@ class _AbiPickerDialogState extends State<_AbiPickerDialog> {
   @override
   void initState() {
     super.initState();
-    _nodes =
-        List.generate(_options.length, (i) => FocusNode(debugLabel: 'abi_$i'));
+    _nodes = List.generate(
+      _options.length,
+      (i) => FocusNode(debugLabel: 'abi_$i'),
+    );
     _enabledIndexes = [];
     for (var i = 0; i < _options.length; i++) {
       if (widget.urlForAbi(_options[i]['id']!) != null) {
@@ -1430,8 +1447,8 @@ class _AbiPickerDialogState extends State<_AbiPickerDialog> {
                 widget.detectedAbi != null
                     ? 'La más óptima para tu dispositivo es: ${widget.labelAbi(widget.detectedAbi!)}'
                     : (widget.preferredAbi != null
-                        ? 'Última usada: ${widget.labelAbi(widget.preferredAbi!)}'
-                        : 'Se recordará tu elección en este dispositivo'),
+                          ? 'Última usada: ${widget.labelAbi(widget.preferredAbi!)}'
+                          : 'Se recordará tu elección en este dispositivo'),
                 style: TextStyle(
                   color: widget.detectedAbi != null
                       ? widget.accent.withValues(alpha: 0.9)
@@ -1503,8 +1520,8 @@ class _AbiPickerDialogState extends State<_AbiPickerDialog> {
                                 color: hasFocus
                                     ? Colors.white
                                     : (isPreferred
-                                        ? widget.accent.withValues(alpha: 0.5)
-                                        : Colors.transparent),
+                                          ? widget.accent.withValues(alpha: 0.5)
+                                          : Colors.transparent),
                                 width: hasFocus ? 2.2 : 1.2,
                               ),
                             ),
@@ -1517,8 +1534,8 @@ class _AbiPickerDialogState extends State<_AbiPickerDialog> {
                                   color: !hasUrl
                                       ? Colors.white24
                                       : (hasFocus || isPreferred
-                                          ? widget.accent
-                                          : Colors.white54),
+                                            ? widget.accent
+                                            : Colors.white54),
                                   size: 22,
                                 ),
                                 const SizedBox(width: 12),
@@ -1537,8 +1554,8 @@ class _AbiPickerDialogState extends State<_AbiPickerDialog> {
                                                     ? Colors.white
                                                     : Colors.white38,
                                                 fontSize: 15,
-                                                fontWeight: hasFocus ||
-                                                        isPreferred
+                                                fontWeight:
+                                                    hasFocus || isPreferred
                                                     ? FontWeight.w700
                                                     : FontWeight.w500,
                                               ),
@@ -1549,12 +1566,13 @@ class _AbiPickerDialogState extends State<_AbiPickerDialog> {
                                             Container(
                                               padding:
                                                   const EdgeInsets.symmetric(
-                                                horizontal: 6,
-                                                vertical: 2,
-                                              ),
+                                                    horizontal: 6,
+                                                    vertical: 2,
+                                                  ),
                                               decoration: BoxDecoration(
-                                                color: widget.accent
-                                                    .withValues(alpha: 0.18),
+                                                color: widget.accent.withValues(
+                                                  alpha: 0.18,
+                                                ),
                                                 borderRadius:
                                                     BorderRadius.circular(6),
                                               ),
@@ -1577,8 +1595,9 @@ class _AbiPickerDialogState extends State<_AbiPickerDialog> {
                                             : 'No disponible en esta versión',
                                         style: TextStyle(
                                           color: hasUrl
-                                              ? Colors.white
-                                                  .withValues(alpha: 0.5)
+                                              ? Colors.white.withValues(
+                                                  alpha: 0.5,
+                                                )
                                               : Colors.white24,
                                           fontSize: 12,
                                         ),
@@ -1593,8 +1612,9 @@ class _AbiPickerDialogState extends State<_AbiPickerDialog> {
                                       vertical: 3,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: widget.accent
-                                          .withValues(alpha: 0.2),
+                                      color: widget.accent.withValues(
+                                        alpha: 0.2,
+                                      ),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
@@ -1883,8 +1903,8 @@ class _SideItem extends StatelessWidget {
                   color: selected
                       ? _kSideAccent
                       : hasFocus
-                          ? Colors.white.withValues(alpha: 0.12)
-                          : Colors.transparent,
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(expanded ? 20 : 10),
                   border: Border.all(
                     color: hasFocus && !selected
@@ -1918,8 +1938,7 @@ class _SideItem extends StatelessWidget {
                               child: Icon(
                                 icon,
                                 size: 14,
-                                color:
-                                    selected ? Colors.white : Colors.white70,
+                                color: selected ? Colors.white : Colors.white70,
                               ),
                             )
                           else
@@ -1963,8 +1982,7 @@ class _SideItem extends StatelessWidget {
                                 child: Icon(
                                   icon,
                                   size: 14,
-                                  color:
-                                      Colors.white.withValues(alpha: 0.92),
+                                  color: Colors.white.withValues(alpha: 0.92),
                                 ),
                               )
                             : Icon(
@@ -2035,11 +2053,11 @@ class _ExitDialogBtn extends StatelessWidget {
               decoration: BoxDecoration(
                 color: primary
                     ? (hasFocus
-                        ? _kAccentColor
-                        : _kAccentColor.withValues(alpha: 0.85))
+                          ? _kAccentColor
+                          : _kAccentColor.withValues(alpha: 0.85))
                     : (hasFocus
-                        ? Colors.white.withValues(alpha: 0.14)
-                        : Colors.white.withValues(alpha: 0.06)),
+                          ? Colors.white.withValues(alpha: 0.14)
+                          : Colors.white.withValues(alpha: 0.06)),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: hasFocus

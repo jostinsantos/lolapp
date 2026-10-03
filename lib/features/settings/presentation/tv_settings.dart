@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'tvchanel/tv_chanel_tab.dart'; // ← ajusta la ruta
 import 'tv_config_shared.dart';
 import 'content/tv_content_tab.dart';
 import 'updates/tv_updates_tab.dart';
@@ -10,11 +11,13 @@ import 'cache/tv_cache_tab.dart';
 import 'player/tv_player_tab.dart';
 import 'supabase/tv_supabase_tab.dart';
 import 'addons/tv_addons_tab.dart';
+
 enum _ConfigTab {
   contenido,
   actualizaciones,
   fuentes,
   addons,
+  tvchanel, // ← NUEVO
   apariencia,
   cache,
   player,
@@ -52,12 +55,14 @@ class ConfigPageState extends State<ConfigPage>
   final GlobalKey<CacheTabState> _cacheKey = GlobalKey();
   final GlobalKey<PlayerTabState> _playerKey = GlobalKey();
   final GlobalKey<TvSupabaseTabState> _supabaseKey = GlobalKey();
+  final GlobalKey<TvChanelTabState> _tvChanelKey = GlobalKey();
 
   static const _tabLabels = [
     'Contenido',
     'Actualizaciones',
     'Fuentes',
     'Addons',
+    'TV / Canales', // ← NUEVO
     'Apariencia',
     'Caché',
     'Player',
@@ -110,8 +115,12 @@ class ConfigPageState extends State<ConfigPage>
   }
 
   void _selectTab(int index, {bool focusContent = false}) {
-    final tab =
-        _ConfigTab.values[index.clamp(0, _ConfigTab.values.length - 1)];
+    final max = _ConfigTab.values.length - 1;
+    final safeIndex = index.clamp(0, max);
+    if (safeIndex >= _tabLabels.length || safeIndex >= _tabNodes.length) {
+      return; // evita RangeError si labels/nodes y enum desincronizan
+    }
+    final tab = _ConfigTab.values[safeIndex];
     final changed = _tab != tab;
     if (changed) {
       setState(() => _tab = tab);
@@ -157,6 +166,8 @@ class ConfigPageState extends State<ConfigPage>
         return _fuentesKey.currentState;
       case _ConfigTab.addons:
         return _addonsKey.currentState;
+      case _ConfigTab.tvchanel: // ← NUEVO
+        return _tvChanelKey.currentState;
       case _ConfigTab.apariencia:
         return _aparienciaKey.currentState;
       case _ConfigTab.cache:
@@ -190,6 +201,11 @@ class ConfigPageState extends State<ConfigPage>
           key: _addonsKey,
           onRequestTabFocus: _focusCurrentTab,
         );
+      case _ConfigTab.tvchanel: // ← NUEVO
+        return TvChanelTab(
+          key: _tvChanelKey,
+          onRequestTabFocus: _focusCurrentTab,
+        );
       case _ConfigTab.apariencia:
         return AparienciaTab(
           key: _aparienciaKey,
@@ -199,15 +215,9 @@ class ConfigPageState extends State<ConfigPage>
           },
         );
       case _ConfigTab.cache:
-        return CacheTab(
-          key: _cacheKey,
-          onRequestTabFocus: _focusCurrentTab,
-        );
+        return CacheTab(key: _cacheKey, onRequestTabFocus: _focusCurrentTab);
       case _ConfigTab.player:
-        return PlayerTab(
-          key: _playerKey,
-          onRequestTabFocus: _focusCurrentTab,
-        );
+        return PlayerTab(key: _playerKey, onRequestTabFocus: _focusCurrentTab);
       case _ConfigTab.supabase:
         return TvSupabaseTab(
           key: _supabaseKey,
@@ -217,11 +227,16 @@ class ConfigPageState extends State<ConfigPage>
   }
 
   Widget _buildTopTabs() {
+    final count = [
+      _tabLabels.length,
+      _tabNodes.length,
+      _ConfigTab.values.length,
+    ].reduce((a, b) => a < b ? a : b);
     return Container(
       color: const Color(0xFF121214),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(
-        children: List.generate(_tabLabels.length, (i) {
+        children: List.generate(count, (i) {
           final selected = _tab.index == i;
           final tabEnum = _ConfigTab.values[i];
           return Expanded(

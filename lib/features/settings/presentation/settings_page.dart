@@ -15,6 +15,9 @@ import 'supabase/supabase_section.dart';
 import 'notifications/notifications_section.dart'; // Notificaciones
 import 'actualizaciones/actualizaciones_page.dart'; // Actualizaciones
 import '../../addons/presentation/screens/addons_hub_page.dart';
+import '../../player/presentation/widgets/mini_player_service.dart';
+import '../../tvchanel/config/m3u8_page.dart';
+import '../../tvchanel/config/addon_chanel.dart';
 import '../../../presentation/mobile/mobile_shell.dart';
 import '../../../core/constants/tmdb_apis.dart';
 import '../../../supabase/supabase_config.dart';
@@ -48,6 +51,7 @@ class _ConfigPageState extends State<ConfigPage> {
   SubSize _subSize = SubSize.mediano;
   SubHeight _subHeight = SubHeight.media;
   bool _idmDownloadEnabled = false;
+  bool _miniPlayerEnabled = true; // prefs: mini_player_enabled
 
   bool _enableDownloads = true;
   bool _showDownloadButtonMain = true;
@@ -149,6 +153,7 @@ class _ConfigPageState extends State<ConfigPage> {
         (e) => e.name == heightCode,
         orElse: () => SubHeight.media,
       );
+      _miniPlayerEnabled = prefs.getBool('mini_player_enabled') ?? true;
       _idmDownloadEnabled = prefs.getBool('idm_download_enabled') ?? false;
 
       _enableDownloads = prefs.getBool('enable_downloads') ?? true;
@@ -354,6 +359,15 @@ class _ConfigPageState extends State<ConfigPage> {
     if (!mounted) return;
     setState(() => _subHeight = height);
     await _saveString('subtitulo_altura', height.name);
+  }
+
+  Future<void> _setMiniPlayerEnabled(bool value) async {
+    if (!mounted) return;
+    setState(() => _miniPlayerEnabled = value);
+    await _saveBool('mini_player_enabled', value);
+    try {
+      await MiniPlayerService.instance.setEnabled(value);
+    } catch (_) {}
   }
 
   Future<void> _setIdmDownloadEnabled(bool value) async {
@@ -996,6 +1010,70 @@ class _ConfigPageState extends State<ConfigPage> {
                     },
                   ),
                   _buildSectionCard(
+                    title: 'TV en Vivo',
+                    subtitle:
+                        'Listas M3U8 y addons de canales (topic lol-tvchanel)',
+                    icon: Icons.live_tv_rounded,
+                    accent: const Color(0xFFE50914),
+                    onTap: () {
+                      showModalBottomSheet(
+                        context: context,
+                        backgroundColor: const Color(0xFF1A1A1F),
+                        shape: const RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.vertical(top: Radius.circular(16)),
+                        ),
+                        builder: (ctx) => SafeArea(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ListTile(
+                                leading: const Icon(Icons.playlist_play_rounded,
+                                    color: Colors.white),
+                                title: const Text('Listas M3U8',
+                                    style: TextStyle(color: Colors.white)),
+                                subtitle: const Text(
+                                    'Añadir, activar o eliminar listas',
+                                    style: TextStyle(color: Colors.white54)),
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                        builder: (_) => const M3u8Page()),
+                                  );
+                                },
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.extension_rounded,
+                                    color: Colors.white),
+                                title: const Text('Addons de Canales',
+                                    style: TextStyle(color: Colors.white)),
+                                subtitle: const Text(
+                                    'Comunidad lol-tvchanel y GitHub manual',
+                                    style: TextStyle(color: Colors.white54)),
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                        builder: (_) =>
+                                            const AddonChanelPage()),
+                                  );
+                                },
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.close,
+                                    color: Colors.white54),
+                                title: const Text('Cancelar',
+                                    style: TextStyle(color: Colors.white54)),
+                                onTap: () => Navigator.pop(ctx),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  _buildSectionCard(
                     title: 'Player',
                     subtitle: 'Subtítulos, tamaño, altura y descarga',
                     icon: Icons.play_circle_outline_rounded,
@@ -1011,10 +1089,12 @@ class _ConfigPageState extends State<ConfigPage> {
                           subSize: _subSize,
                           subHeight: _subHeight,
                           idmDownloadEnabled: _idmDownloadEnabled,
+                          miniPlayerEnabled: _miniPlayerEnabled,
                           onSubsChanged: (v) => _setSubsAlInicio(v),
                           onSubSizeChanged: (v) => _setSubSize(v),
                           onSubHeightChanged: (v) => _setSubHeight(v),
                           onIdmChanged: (v) => _setIdmDownloadEnabled(v),
+                          onMiniPlayerChanged: (v) => _setMiniPlayerEnabled(v),
                         ).build(),
                       ),
                     ),

@@ -13,11 +13,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../features/home/presentation/home_page.dart';
+import '../../features/tvchanel/home/home_tvchanel.dart';
+import '../../core/services/session_watch_timer.dart';
+import '../../features/player/presentation/widgets/mini_player_service.dart';
 import '../../features/search/presentation/search_page.dart';
 import '../../features/favorites/presentation/favorites_page.dart';
 import '../../features/settings/presentation/settings_page.dart';
 import '../../features/discover/domain/mobile/pag.dart';
 import '../../features/player/presentation/player_page.dart';
+import '../../features/tvchanel/player/player_tvchanel.dart';
+import '../../features/tvchanel/models/tv_channel_models.dart';
 import '../shared/modals/playback_setup_modal.dart';
 import '../../core/constants/versiones.dart';
 import '../../core/utils/display_refresh.dart';
@@ -54,6 +59,7 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
   static const int _kBuscar = 4;
 
   int _currentIndex = _kHome;
+  bool _tvLiveMode = false; // Home VOD vs TV en Vivo
 
   final GlobalKey _homeKey = GlobalKey();
   final GlobalKey _bibliotecaKey = GlobalKey();
@@ -93,10 +99,13 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
     DisplayRefresh.requestHighest();
     WidgetsBinding.instance.addObserver(this);
     DownloadNavBus.version.addListener(_onDownloadNavBus);
+    MiniPlayerService.instance.addListener(_onMiniPlayer);
+    MiniPlayerService.instance.loadPref();
     _loadContinueItem();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _bootstrapOfflineOrSetup();
       _checkForUpdate();
+      SessionWatchTimer.instance.start(context);
     });
   }
 
@@ -104,6 +113,7 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
   void dispose() {
     DownloadNavBus.version.removeListener(_onDownloadNavBus);
     WidgetsBinding.instance.removeObserver(this);
+    MiniPlayerService.instance.removeListener(_onMiniPlayer);
     super.dispose();
   }
 
@@ -608,6 +618,74 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
     if (saved) _loadContinueItem();
   }
 
+
+  Future<void> _openMiniPlayer() async {
+    final mini = MiniPlayerService.instance;
+    if (!mini.isActive && !mini.isInitializing) return;
+
+    // 1) Sincronizar posición actual del mini → caché del player
+    //    (así al reabrir no vuelve al minuto del minimize)
+    try {
+      final c = mini.controller;
+      if (c != null && c.value.isInitialized) {
+        mini.position = c.value.position;
+      }
+    } catch (_) {}
+    await mini.saveProgress(force: true);
+
+    final args = mini.expandArgs();
+    final startSec = args['startAt'] as int? ?? 0;
+
+    // 2) Cerrar mini (libera decoder) después de guardar
+    await mini.stop();
+    if (!mounted) return;
+    setState(() {});
+
+    // 3) Pequeña pausa para liberar MediaCodec antes del full player
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    if (!mounted) return;
+
+    final tipo = (args['tipo'] ?? 'movie').toString().toLowerCase();
+    if (tipo == 'live') {
+      // Canales en vivo → player de TV Channels (no el player VOD)
+      final ch = TvChannel(
+        id: 'mini-${args['idcontenido']}',
+        name: (args['titulo'] ?? 'Canal').toString(),
+        url: (args['videoUrl'] ?? '').toString(),
+        logo: args['poster']?.toString(),
+      );
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PlayerTvChanel(channel: ch),
+        ),
+      );
+    } else {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PlayerScreen(
+            videoUrl: (args['videoUrl'] ?? '').toString(),
+            idcontenido: args['idcontenido'] as int? ?? 0,
+            temporada: args['temporada'] as int?,
+            capitulo: args['capitulo'] as int?,
+            tipo: (args['tipo'] ?? 'movie').toString(),
+            titulo: (args['titulo'] ?? '').toString(),
+            tmdbId: args['tmdbId'] as int?,
+            idioma: args['idioma']?.toString(),
+            headers: args['headers'] is Map
+                ? Map<String, String>.from(args['headers'] as Map)
+                : null,
+          ),
+        ),
+      );
+      _loadContinueItem();
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _onMiniPlayer() {
+    if (mounted) setState(() {});
+  }
+
   void _onContinueBus() {
     if (!mounted) return;
     _continueDismissed = false;
@@ -830,7 +908,10 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
   Widget _buildPage(int index) {
     switch (index) {
       case _kHome:
-        return _homeLoaded ? HomePage(key: _homeKey) : const SizedBox.shrink();
+        if (!_homeLoaded) return const SizedBox.shrink();
+        return _tvLiveMode
+            ? const HomeTvChanel(key: ValueKey('tvLiveHome'))
+            : HomePage(key: _homeKey);
       case _kBiblioteca:
         return _bibliotecaLoaded
             ? BibliotecaUnificadaPage(key: _bibliotecaKey)
@@ -1112,24 +1193,27 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
                 key: ValueKey(
                   isSearch ? 'collapsed-search' : 'collapsed-other',
                 ),
-                mainAxisAlignment: isSearch
-                    ? MainAxisAlignment
-                          .end // solo buscar → a la derecha
-                    : MainAxisAlignment.spaceBetween, // activo izq + buscar der
                 children: [
-                  // Solo mostramos el círculo de la izquierda si NO estamos en Buscar
                   if (!isSearch)
                     _buildCircleNav(
                       icon: _activeIcon,
                       selected: true,
-                      // Página actual colapsada: ir al top (no expandir menú)
                       onTap: _scrollCurrentPageToTop,
                     ),
-
-                  // Siempre el de buscar a la derecha
+                  // Espacio central: mini-player compacto si está activo
+                  if (!isSearch && MiniPlayerService.instance.isActive) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _MiniPlayerBarCompact(
+                        onExpand: _openMiniPlayer,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                  ] else
+                    const Spacer(),
                   _buildCircleNav(
                     icon: Icons.search_rounded,
-                    selected: true, // porque estamos en buscar o es el botón
+                    selected: true,
                     onTap: () => _selectTab(_kBuscar),
                   ),
                 ],
@@ -1244,8 +1328,74 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
                       ),
                     ),
 
-                    // Continuar viendo (se oculta al hacer scroll)
-                    if (_showContinueCard)
+
+                    // AppBar transparente solo en Home: botón TV Live / VOD
+                    if (_currentIndex == _kHome)
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: SafeArea(
+                          bottom: false,
+                          child: SizedBox(
+                            height: 52,
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(() => _tvLiveMode = !_tvLiveMode);
+                                  },
+                                  child: Container(
+                                    width: 44,
+                                    height: 44,
+                                    decoration: const BoxDecoration(
+                                      shape: BoxShape.circle,
+                                    ),
+                                    clipBehavior: Clip.antiAlias,
+                                    child: Image.asset(
+                                      _tvLiveMode
+                                          ? 'assets/images/vod.png'
+                                          : 'assets/images/tvlive.png',
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => Container(
+                                        color: const Color(0xFFE50914),
+                                        child: Icon(
+                                          _tvLiveMode
+                                              ? Icons.movie_rounded
+                                              : Icons.live_tv_rounded,
+                                          color: Colors.white,
+                                          size: 22,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    // Mini-player GRANDE: solo en top (menú expandido)
+                    if (!_navCollapsed &&
+                        (MiniPlayerService.instance.isActive ||
+                            MiniPlayerService.instance.isInitializing))
+                      Positioned(
+                        left: 16,
+                        right: 16,
+                        bottom: 12 + bottomPad + 58 + 10,
+                        child: _MiniPlayerBar(
+                          onExpand: _openMiniPlayer,
+                          onStop: () async {
+                            await MiniPlayerService.instance.stop();
+                            if (mounted) setState(() {});
+                          },
+                        ),
+                      )
+                    // Continuar viendo (solo si no hay mini-player y menú expandido)
+                    else if (!_navCollapsed && _showContinueCard)
                       Positioned(
                         left: 16,
                         right: 16,
@@ -1266,6 +1416,7 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
                           ),
                         ),
                       ),
+
 
                     // Menú inferior
                     _buildBottomNav(bottomPad),
@@ -1483,6 +1634,249 @@ class _NavIcon extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─── Mini player bar ────────────────────────────────────────────────────────
+
+class _MiniPlayerBar extends StatelessWidget {
+  final VoidCallback onExpand;
+  final VoidCallback onStop;
+
+  const _MiniPlayerBar({required this.onExpand, required this.onStop});
+
+  @override
+  Widget build(BuildContext context) {
+    final mini = MiniPlayerService.instance;
+    return AnimatedBuilder(
+      animation: mini,
+      builder: (context, _) {
+        final isLive = mini.tipo.toLowerCase() == 'live';
+        final dur = mini.duration.inMilliseconds;
+        final pos = mini.position.inMilliseconds;
+        final progress = (!isLive && dur > 0) ? (pos / dur).clamp(0.0, 1.0) : 0.0;
+        final posLabel = _fmt(mini.position);
+        final durLabel = _fmt(mini.duration);
+        final timeText = isLive ? 'En vivo' : '$posLabel / $durLabel';
+
+        return Material(
+          color: Colors.transparent,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1C1C1E).withValues(alpha: 0.95),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Progress solo VOD; live sin barra
+                    if (!isLive)
+                      ClipRRect(
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          minHeight: 3,
+                          backgroundColor: Colors.white12,
+                          color: const Color(0xFFE50914),
+                        ),
+                      ),
+                    SizedBox(
+                      height: 64,
+                      child: Row(
+                        children: [
+                          const SizedBox(width: 8),
+                          IconButton(
+                            onPressed: () => mini.togglePlay(),
+                            icon: Icon(
+                              mini.isPlaying
+                                  ? Icons.pause_rounded
+                                  : Icons.play_arrow_rounded,
+                              color: Colors.white,
+                              size: 28,
+                            ),
+                          ),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: onExpand,
+                              behavior: HitTestBehavior.opaque,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    mini.title.isEmpty ? 'Reproduciendo…' : mini.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    timeText,
+                                    style: TextStyle(
+                                      color: isLive
+                                          ? const Color(0xFFE50914)
+                                          : Colors.white.withValues(alpha: 0.5),
+                                      fontSize: 11,
+                                      fontWeight: isLive ? FontWeight.w700 : FontWeight.w400,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Pantalla completa',
+                            onPressed: onExpand,
+                            icon: const Icon(Icons.open_in_full_rounded,
+                                color: Colors.white70, size: 20),
+                          ),
+                          IconButton(
+                            tooltip: 'Cerrar',
+                            onPressed: onStop,
+                            icon: const Icon(Icons.close_rounded,
+                                color: Colors.white54, size: 20),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  static String _fmt(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+}
+
+class _MiniPlayerBarCompact extends StatelessWidget {
+  final VoidCallback onExpand;
+  const _MiniPlayerBarCompact({required this.onExpand});
+
+  static String _fmt(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mini = MiniPlayerService.instance;
+    return AnimatedBuilder(
+      animation: mini,
+      builder: (context, _) {
+        final isLive = mini.tipo.toLowerCase() == 'live';
+        final durMs = mini.duration.inMilliseconds;
+        final posMs = mini.position.inMilliseconds;
+        final progress = (!isLive && durMs > 0) ? (posMs / durMs).clamp(0.0, 1.0) : 0.0;
+        final posLabel = _fmt(mini.position);
+        final durLabel = _fmt(mini.duration);
+        final timeText = isLive ? 'En vivo' : '$posLabel / $durLabel';
+
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onExpand, // abre player en horizontal
+            borderRadius: BorderRadius.circular(24),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFF1C1C1E).withValues(alpha: 0.95),
+                borderRadius: BorderRadius.circular(24),
+                border:
+                    Border.all(color: Colors.white.withValues(alpha: 0.12)),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                children: [
+                  if (!isLive)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 2,
+                        backgroundColor: Colors.transparent,
+                        color: const Color(0xFFE50914),
+                      ),
+                    ),
+                  Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => mini.togglePlay(),
+                        icon: Icon(
+                          mini.isPlaying
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                      ),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              mini.title.isEmpty
+                                  ? 'Reproduciendo…'
+                                  : mini.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              timeText,
+                              maxLines: 1,
+                              style: TextStyle(
+                                color: isLive
+                                    ? const Color(0xFFE50914)
+                                    : Colors.white.withValues(alpha: 0.55),
+                                fontSize: 10,
+                                fontWeight:
+                                    isLive ? FontWeight.w700 : FontWeight.w400,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.only(right: 10),
+                        child: Icon(Icons.open_in_full_rounded,
+                            color: Colors.white54, size: 16),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
