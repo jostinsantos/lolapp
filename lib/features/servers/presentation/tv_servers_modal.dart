@@ -14,6 +14,7 @@ import '../../player/presentation/tv/tv_player_page.dart';
 // Preloader TV = ServidoresPreloader
 import 'tv_server_preloader.dart';
 import '../../player/presentation/tv/tv_player_webview.dart';
+import '../../downloads/presentation/extractor_download_page_tv.dart';
 
 // ── Colores (alineados con estilo Nuvio / móvil) ───────────────────────────
 const _kAccent = Color(0xFFE50914);
@@ -326,6 +327,7 @@ class ServidoresModalTv extends StatefulWidget {
   final String? titulo;
   final bool fromPlayer;
   final bool esSiguienteCapitulo;
+  final bool forDownload;
   final String? backdropUrl;
   final String? posterUrl;
   final String? logoUrl;
@@ -343,6 +345,7 @@ class ServidoresModalTv extends StatefulWidget {
     this.titulo,
     this.fromPlayer = false,
     this.esSiguienteCapitulo = false,
+    this.forDownload = false,
     this.backdropUrl,
     this.posterUrl,
     this.logoUrl,
@@ -1174,6 +1177,43 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
     if (!mounted) return;
     final nav = Navigator.of(context);
 
+    // ── Descarga: siempre al ExtractorDownloadPageTv (misma lógica que móvil) ──
+    if (widget.forDownload) {
+      final dlHeaders = <String, String>{};
+      final rawH = servidor['headers'];
+      if (rawH is Map) {
+        rawH.forEach((k, v) {
+          if (k != null && v != null && '$v'.isNotEmpty) {
+            dlHeaders['$k'] = '$v';
+          }
+        });
+      }
+      final downloadRoute = MaterialPageRoute(
+        builder: (_) => ExtractorDownloadPageTv(
+          idcontenido: widget.idcontenido,
+          temporada: _isMovie ? null : widget.temporada,
+          capitulo: _isMovie ? null : widget.capitulo,
+          servidorUrl: embedUrl,
+          servidorNombre: nombre,
+          tipo: _mediaType,
+          titulo: tituloFinal,
+          idServidor: servidor['id_servidor'] as int?,
+          tmdbId: _resolvedTmdbId,
+          posterUrl: widget.posterUrl,
+          backdropUrl: widget.backdropUrl,
+          headers: dlHeaders.isEmpty ? null : dlHeaders,
+        ),
+      );
+      if (widget.fromPlayer) {
+        nav.pop();
+        nav.pushReplacement(downloadRoute);
+      } else {
+        nav.pushReplacement(downloadRoute);
+      }
+      _schedulePreload();
+      return;
+    }
+
     // ── NUEVO: si NO es player (no hay HLS ni directo) → WebView ──
     if (!esPlayer) {
       final route = MaterialPageRoute(
@@ -1668,7 +1708,7 @@ class _ServidoresModalTvState extends State<ServidoresModalTv> {
           ),
           const SizedBox(width: 8),
           Text(
-            'Servidores',
+            widget.forDownload ? 'Descargar' : 'Servidores',
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.85),
               fontSize: 16,

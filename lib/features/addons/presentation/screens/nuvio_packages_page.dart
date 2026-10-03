@@ -150,17 +150,72 @@ class _NuvioPackagesPageState extends State<NuvioPackagesPage> {
     }
   }
 
+
+  Future<void> _showAddModalTv() async {
+    final ctrl = TextEditingController(text: _urlCtrl.text);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1F),
+        title: const Text('URL del manifest', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'https://…/manifest.json',
+            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+            filled: true,
+            fillColor: const Color(0xFF1C1C1E),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cargar', style: TextStyle(color: Color(0xFFE50914))),
+          ),
+        ],
+      ),
+    );
+    // Evita '_dependents.isEmpty' al cerrar: quitar foco del TextField antes de dispose
+    try {
+      FocusManager.instance.primaryFocus?.unfocus();
+    } catch (_) {}
+    if (ok == true && mounted) {
+      _urlCtrl.text = ctrl.text.trim();
+      await _loadManifest();
+    }
+    // dispose del controller en el siguiente frame (después de que el dialog se desmonte)
+    final c = ctrl;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      c.dispose();
+    });
+    if (mounted) {
+      FocusScope.of(context).unfocus();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final packages = AddonManager.instance.packages;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A0A0A),
-        title: const Text('Addons Nuvio', style: TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
+      appBar: widget.isTv
+          ? null
+          : AppBar(
+              backgroundColor: const Color(0xFF0A0A0A),
+              title: const Text('Addons Nuvio', style: TextStyle(color: Colors.white)),
+              iconTheme: const IconThemeData(color: Colors.white),
+            ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -170,43 +225,62 @@ class _NuvioPackagesPageState extends State<NuvioPackagesPage> {
             style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.35),
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _urlCtrl,
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: 'https://…/manifest.json',
-              hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
-              filled: true,
-              fillColor: const Color(0xFF1C1C1E),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide.none,
+          if (!widget.isTv) ...[
+            TextField(
+              controller: _urlCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'https://…/manifest.json',
+                hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                filled: true,
+                fillColor: const Color(0xFF1C1C1E),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFE50914),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-              onPressed: _busy ? null : _loadManifest,
-              icon: _busy
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.cloud_download_rounded, color: Colors.white),
-              label: Text(
-                _busy ? (_progress ?? 'Cargando…') : 'Cargar paquete',
-                style: const TextStyle(color: Colors.white),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFE50914),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                onPressed: _busy ? null : _loadManifest,
+                icon: _busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.cloud_download_rounded, color: Colors.white),
+                label: Text(
+                  _busy ? (_progress ?? 'Cargando…') : 'Cargar paquete',
+                  style: const TextStyle(color: Colors.white),
+                ),
               ),
             ),
-          ),
+          ] else ...[
+            // TV: botón Agregar abre modal con input (evita teclado bloqueando foco)
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFE50914),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                onPressed: _busy ? null : _showAddModalTv,
+                icon: const Icon(Icons.add_rounded, color: Colors.white),
+                label: Text(
+                  _busy ? (_progress ?? 'Cargando…') : 'Agregar paquete (manual)',
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
+                ),
+              ),
+            ),
+          ],
           if (_msg != null) ...[
             const SizedBox(height: 10),
             Text(_msg!, style: const TextStyle(color: Colors.white70, fontSize: 12)),

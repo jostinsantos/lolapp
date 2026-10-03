@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../data/addons/addon_manager.dart';
 import '../../../../data/addons/models/addon.dart';
 import 'nuvio_packages_page.dart';
 import '../../../../data/addons/services/community_service.dart';
+import 'tv_addons_actuales_page.dart';
+import 'tv_addons_comunidad_page.dart';
+import 'tv_nuvio_packages_page.dart';
 
 /// Hub de addons: 2 opciones — Addons actuales | Comunidad (Git).
 /// No altera el resto de la UI de la app; se integra en Configuración.
@@ -39,9 +43,91 @@ class _AddonsHubPageState extends State<AddonsHubPage> {
   @override
   Widget build(BuildContext context) {
     final isTv = widget.isTv;
+    if (isTv) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0A0A0A),
+        // TV: sin AppBar — el foco y D-pad recorren toda la página
+        body: SafeArea(
+          child: FocusTraversalGroup(
+            policy: OrderedTraversalPolicy(),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+              children: [
+                const Text(
+                  'Addons',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Gestiona fuentes y catálogos con el mando',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.55),
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _tile(
+                  context,
+                  icon: Icons.extension_rounded,
+                  title: 'Addons actuales',
+                  subtitle:
+                      'Fuentes y catálogos instalados. Activar, actualizar o borrar.',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const TvAddonsActualesPage(),
+                    ),
+                  ),
+                  isTv: true,
+                  autofocus: true,
+                ),
+                const SizedBox(height: 12),
+                _tile(
+                  context,
+                  icon: Icons.public_rounded,
+                  title: 'Comunidad',
+                  subtitle:
+                      'Instalar fuentes y catálogos desde GitHub (user/repo).',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const TvAddonsComunidadPage(),
+                    ),
+                  ),
+                  isTv: true,
+                ),
+                const SizedBox(height: 12),
+                _tile(
+                  context,
+                  icon: Icons.inventory_2_rounded,
+                  title: 'Addons Nuvio',
+                  subtitle:
+                      'Pegar URL de manifest e instalar fuentes una a una o todas.',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const TvNuvioPackagesPage(),
+                    ),
+                  ),
+                  isTv: true,
+                ),
+                const SizedBox(height: 28),
+                _TvTorrentSwitch(
+                  value: _torrentMkv,
+                  onChanged: _setTorrentMkv,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // ── Móvil: AppBar + sin foco D-pad ───────────────────────────────────
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
-      appBar: AppBar(
+      appBar: widget.isTv ? null : AppBar(
         backgroundColor: const Color(0xFF0A0A0A),
         title: const Text('Addons', style: TextStyle(color: Colors.white)),
         iconTheme: const IconThemeData(color: Colors.white),
@@ -53,10 +139,11 @@ class _AddonsHubPageState extends State<AddonsHubPage> {
             context,
             icon: Icons.extension_rounded,
             title: 'Addons actuales',
-            subtitle: 'Fuentes y catálogos instalados. Activar, actualizar o borrar.',
+            subtitle:
+                'Fuentes y catálogos instalados. Activar, actualizar o borrar.',
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => AddonsActualesPage(isTv: isTv),
+                builder: (_) => const AddonsActualesPage(isTv: false),
               ),
             ),
           ),
@@ -65,10 +152,11 @@ class _AddonsHubPageState extends State<AddonsHubPage> {
             context,
             icon: Icons.public_rounded,
             title: 'Comunidad',
-            subtitle: 'Instalar fuentes y catálogos desde GitHub (user/repo).',
+            subtitle:
+                'Instalar fuentes y catálogos desde GitHub (user/repo).',
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => AddonsComunidadPage(isTv: isTv),
+                builder: (_) => const AddonsComunidadPage(isTv: false),
               ),
             ),
           ),
@@ -77,10 +165,11 @@ class _AddonsHubPageState extends State<AddonsHubPage> {
             context,
             icon: Icons.inventory_2_rounded,
             title: 'Addons Nuvio',
-            subtitle: 'Pegar URL de manifest y instalar fuentes una a una o todas.',
+            subtitle:
+                'Pegar URL de manifest e instalar fuentes una a una o todas.',
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => NuvioPackagesPage(isTv: isTv),
+                builder: (_) => const NuvioPackagesPage(isTv: false),
               ),
             ),
           ),
@@ -95,7 +184,8 @@ class _AddonsHubPageState extends State<AddonsHubPage> {
               _torrentMkv
                   ? 'Habilitado: se intentará reproducir magnets y MKV'
                   : 'Deshabilitado (experimental). Puedes activarlo cuando quieras.',
-              style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 12),
+              style:
+                  TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 12),
             ),
             value: _torrentMkv,
             activeColor: const Color(0xFFE50914),
@@ -112,40 +202,168 @@ class _AddonsHubPageState extends State<AddonsHubPage> {
     required String title,
     required String subtitle,
     required VoidCallback onTap,
+    bool isTv = false,
+    bool autofocus = false,
   }) {
-    return Material(
-      color: const Color(0xFF1C1C1E),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
+    if (!isTv) {
+      return Material(
+        color: const Color(0xFF1C1C1E),
         borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Icon(icon, color: const Color(0xFFE50914), size: 32),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text(subtitle,
-                        style: TextStyle(
-                            color: Colors.white.withOpacity(0.6),
-                            fontSize: 13)),
-                  ],
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(icon, color: const Color(0xFFE50914), size: 32),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Text(subtitle,
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.6),
+                              fontSize: 13)),
+                    ],
+                  ),
                 ),
-              ),
-              const Icon(Icons.chevron_right, color: Colors.white54),
-            ],
+                const Icon(Icons.chevron_right, color: Colors.white54),
+              ],
+            ),
           ),
         ),
+      );
+    }
+
+    // TV: foco blanco, navegable con D-pad
+    return Focus(
+      autofocus: autofocus,
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        final key = event.logicalKey;
+        if (key == LogicalKeyboardKey.select ||
+            key == LogicalKeyboardKey.enter ||
+            key == LogicalKeyboardKey.space) {
+          onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Builder(
+        builder: (context) {
+          final focused = Focus.of(context).hasFocus;
+          return GestureDetector(
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: focused
+                    ? const Color(0xFF2A2A30)
+                    : const Color(0xFF1C1C1E),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: focused ? Colors.white : Colors.transparent,
+                  width: focused ? 2.5 : 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(icon, color: const Color(0xFFE50914), size: 30),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 4),
+                        Text(subtitle,
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.6),
+                                fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, color: Colors.white54),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Switch con foco TV (borde blanco)
+class _TvTorrentSwitch extends StatefulWidget {
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  const _TvTorrentSwitch({required this.value, required this.onChanged});
+
+  @override
+  State<_TvTorrentSwitch> createState() => _TvTorrentSwitchState();
+}
+
+class _TvTorrentSwitchState extends State<_TvTorrentSwitch> {
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onKeyEvent: (n, e) {
+        if (e is! KeyDownEvent) return KeyEventResult.ignored;
+        if (e.logicalKey == LogicalKeyboardKey.select ||
+            e.logicalKey == LogicalKeyboardKey.enter ||
+            e.logicalKey == LogicalKeyboardKey.space) {
+          widget.onChanged(!widget.value);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Builder(
+        builder: (context) {
+          final focused = Focus.of(context).hasFocus;
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: focused ? Colors.white : Colors.transparent,
+                width: focused ? 2.5 : 1,
+              ),
+            ),
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                'Archivos magnet (torrent) y MKV',
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                widget.value
+                    ? 'Habilitado: se intentará reproducir magnets y MKV'
+                    : 'Deshabilitado (experimental).',
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.55), fontSize: 12),
+              ),
+              value: widget.value,
+              activeColor: const Color(0xFFE50914),
+              onChanged: widget.onChanged,
+            ),
+          );
+        },
       ),
     );
   }
@@ -186,7 +404,7 @@ class _AddonsActualesPageState extends State<AddonsActualesPage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
-      appBar: AppBar(
+      appBar: widget.isTv ? null : AppBar(
         backgroundColor: const Color(0xFF0A0A0A),
         title: const Text('Addons actuales', style: TextStyle(color: Colors.white)),
         iconTheme: const IconThemeData(color: Colors.white),
@@ -435,6 +653,107 @@ class _AddonsComunidadPageState extends State<AddonsComunidadPage>
     return false;
   }
 
+
+  Future<void> _showManualAddModalTv() async {
+    final ctrl = TextEditingController(text: _repoCtrl.text);
+    AddonType type = _manualType;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1A1A1F),
+              title: const Text('Instalar addon',
+                  style: TextStyle(color: Colors.white)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'owner/repo o URL de manifest',
+                      hintStyle:
+                          TextStyle(color: Colors.white.withOpacity(0.3)),
+                      filled: true,
+                      fillColor: const Color(0xFF1C1C1E),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Fuente'),
+                        selected: type == AddonType.source,
+                        onSelected: (_) =>
+                            setLocal(() => type = AddonType.source),
+                        selectedColor: const Color(0xFFE50914),
+                        labelStyle: TextStyle(
+                          color: type == AddonType.source
+                              ? Colors.white
+                              : Colors.white70,
+                        ),
+                        backgroundColor: const Color(0xFF1C1C1E),
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text('Catálogo'),
+                        selected: type == AddonType.catalog,
+                        onSelected: (_) =>
+                            setLocal(() => type = AddonType.catalog),
+                        selectedColor: const Color(0xFFE50914),
+                        labelStyle: TextStyle(
+                          color: type == AddonType.catalog
+                              ? Colors.white
+                              : Colors.white70,
+                        ),
+                        backgroundColor: const Color(0xFF1C1C1E),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancelar'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Instalar',
+                      style: TextStyle(color: Color(0xFFE50914))),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    try {
+      FocusManager.instance.primaryFocus?.unfocus();
+    } catch (_) {}
+    if (ok == true && mounted) {
+      _repoCtrl.text = ctrl.text.trim();
+      setState(() => _manualType = type);
+      await _installManual();
+    }
+    final c = ctrl;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      try {
+        c.dispose();
+      } catch (_) {}
+    });
+    if (mounted) {
+      FocusScope.of(context).unfocus();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -468,70 +787,86 @@ class _AddonsComunidadPageState extends State<AddonsComunidadPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextField(
-                  controller: _repoCtrl,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    hintText: 'owner/repo o URL de manifest',
-                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
-                    filled: true,
-                    fillColor: const Color(0xFF1C1C1E),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
+                if (!widget.isTv) ...[
+                  TextField(
+                    controller: _repoCtrl,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'owner/repo o URL de manifest',
+                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                      filled: true,
+                      fillColor: const Color(0xFF1C1C1E),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 12),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 12),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    ChoiceChip(
-                      label: const Text('Fuente'),
-                      selected: _manualType == AddonType.source,
-                      onSelected: (_) =>
-                          setState(() => _manualType = AddonType.source),
-                      selectedColor: const Color(0xFFE50914),
-                      labelStyle: TextStyle(
-                        color: _manualType == AddonType.source
-                            ? Colors.white
-                            : Colors.white70,
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Fuente'),
+                        selected: _manualType == AddonType.source,
+                        onSelected: (_) =>
+                            setState(() => _manualType = AddonType.source),
+                        selectedColor: const Color(0xFFE50914),
+                        labelStyle: TextStyle(
+                          color: _manualType == AddonType.source
+                              ? Colors.white
+                              : Colors.white70,
+                        ),
+                        backgroundColor: const Color(0xFF1C1C1E),
                       ),
-                      backgroundColor: const Color(0xFF1C1C1E),
-                    ),
-                    const SizedBox(width: 8),
-                    ChoiceChip(
-                      label: const Text('Catálogo'),
-                      selected: _manualType == AddonType.catalog,
-                      onSelected: (_) =>
-                          setState(() => _manualType = AddonType.catalog),
-                      selectedColor: const Color(0xFFE50914),
-                      labelStyle: TextStyle(
-                        color: _manualType == AddonType.catalog
-                            ? Colors.white
-                            : Colors.white70,
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text('Catálogo'),
+                        selected: _manualType == AddonType.catalog,
+                        onSelected: (_) =>
+                            setState(() => _manualType = AddonType.catalog),
+                        selectedColor: const Color(0xFFE50914),
+                        labelStyle: TextStyle(
+                          color: _manualType == AddonType.catalog
+                              ? Colors.white
+                              : Colors.white70,
+                        ),
+                        backgroundColor: const Color(0xFF1C1C1E),
                       ),
-                      backgroundColor: const Color(0xFF1C1C1E),
-                    ),
-                    const Spacer(),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFE50914),
+                      const Spacer(),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFE50914),
+                        ),
+                        onPressed: _manualBusy ? null : _installManual,
+                        child: _manualBusy
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Text('Instalar',
+                                style: TextStyle(color: Colors.white)),
                       ),
-                      onPressed: _manualBusy ? null : _installManual,
-                      child: _manualBusy
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white),
-                            )
-                          : const Text('Instalar',
-                              style: TextStyle(color: Colors.white)),
+                    ],
+                  ),
+                ] else ...[
+                  // TV: botón Agregar abre modal (evita teclado bloqueando foco D-pad)
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFE50914),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                  ],
-                ),
+                    onPressed: _manualBusy ? null : _showManualAddModalTv,
+                    icon: const Icon(Icons.add_rounded, color: Colors.white),
+                    label: Text(
+                      _manualBusy ? 'Instalando…' : 'Agregar manualmente',
+                      style: const TextStyle(color: Colors.white, fontSize: 15),
+                    ),
+                  ),
+                ],
                 if (_manualMsg != null) ...[
                   const SizedBox(height: 6),
                   Text(_manualMsg!,

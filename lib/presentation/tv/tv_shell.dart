@@ -16,12 +16,15 @@ import 'package:url_launcher/url_launcher.dart';
 import '../shared/modals/playback_setup_modal.dart';
 import '../../core/constants/versiones.dart'; // ← VersionService + VersionInfo con URLs por ABI
 import '../../features/home/presentation/tv_home_page.dart';
+import '../../features/home/presentation/tv_placeholder_page.dart';
 import '../../features/search/presentation/tv_search_page.dart';
 import '../../features/history/presentation/history_page.dart';
 import '../../features/settings/presentation/tv_settings.dart';
 import '../../features/profile/presentation/profile_page.dart';
 import '../../features/discover/presentation/discover_page.dart';
 import '../../features/discover/presentation/tv_discover_page.dart';
+import '../../features/downloads/presentation/downloads_page_tv.dart';
+import '../../core/utils/display_refresh.dart';
 
 const _kAccentColor = Color(0xFFE50914);
 const _kSideAccent = Color(0xFF7B5CFF);
@@ -47,6 +50,9 @@ class _MainHomeState extends State<MainHome> {
   final FocusNode _searchFocusNode = FocusNode(debugLabel: 'menu_buscar');
   final FocusNode _guardadosTabFocusNode =
       FocusNode(debugLabel: 'menu_biblio');
+  final FocusNode _descargasTabFocusNode =
+      FocusNode(debugLabel: 'menu_descargas');
+  final FocusNode _tvTabFocusNode = FocusNode(debugLabel: 'menu_tv');
   final FocusNode _settingsFocusNode = FocusNode(debugLabel: 'menu_config');
 
   // Foco del banner de actualización
@@ -60,6 +66,8 @@ class _MainHomeState extends State<MainHome> {
   FocusNode? _descubrirContentFocusNode;
   FocusNode? _fuentesContentFocusNode;
   FocusNode? _guardadosContentFocusNode;
+  FocusNode? _descargasContentFocusNode;
+  FocusNode? _tvContentFocusNode;
   FocusNode? _configContentFocusNode;
   FocusNode? _perfilContentFocusNode;
   BuscarPageState? _buscarPageState;
@@ -74,10 +82,14 @@ class _MainHomeState extends State<MainHome> {
   bool _descubrirLoaded = false;
   bool _fuentesLoaded = false;
   bool _guardadosLoaded = false;
+  bool _descargasLoaded = false;
+  bool _tvLoaded = false;
   bool _perfilLoaded = false;
 
   static const int _kPerfilIndex = 6;
   static const int _kFuentesIndex = 2;
+  static const int _kDescargasIndex = 7;
+  static const int _kTvIndex = 8;
   static const double _railWidth = 52;
 
   String _currentTime = '';
@@ -121,6 +133,8 @@ class _MainHomeState extends State<MainHome> {
       _fuentesTabFocusNode,
       _searchFocusNode,
       _guardadosTabFocusNode,
+      _descargasTabFocusNode,
+      _tvTabFocusNode,
       _settingsFocusNode,
     ];
     for (final node in _menuFocusNodes) {
@@ -131,6 +145,9 @@ class _MainHomeState extends State<MainHome> {
       const Duration(seconds: 30),
       (_) => _updateTime(),
     );
+
+    // Adaptar la app al máximo Hz de la pantalla (60/90/120/144)
+    DisplayRefresh.requestHighest();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForUpdate();
@@ -535,6 +552,10 @@ class _MainHomeState extends State<MainHome> {
         return _configContentFocusNode;
       case _kPerfilIndex:
         return _perfilContentFocusNode;
+      case _kDescargasIndex:
+        return _descargasContentFocusNode;
+      case _kTvIndex:
+        return _tvContentFocusNode;
       default:
         return null;
     }
@@ -556,6 +577,10 @@ class _MainHomeState extends State<MainHome> {
         return _settingsFocusNode;
       case _kPerfilIndex:
         return _profileFocusNode;
+      case _kDescargasIndex:
+        return _descargasTabFocusNode;
+      case _kTvIndex:
+        return _tvTabFocusNode;
       default:
         return _homeTabFocusNode;
     }
@@ -629,6 +654,8 @@ class _MainHomeState extends State<MainHome> {
     if (index == 1) _descubrirLoaded = true;
     if (index == _kFuentesIndex) _fuentesLoaded = true;
     if (index == 4) _guardadosLoaded = true;
+    if (index == _kDescargasIndex) _descargasLoaded = true;
+    if (index == _kTvIndex) _tvLoaded = true;
     if (index == _kPerfilIndex) {
       _perfilLoaded = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -649,6 +676,12 @@ class _MainHomeState extends State<MainHome> {
       _fuentesLoaded = false;
     }
     if (_currentIndex == 4 && index != 4) _guardadosLoaded = false;
+    if (_currentIndex == _kDescargasIndex && index != _kDescargasIndex) {
+      _descargasLoaded = false;
+    }
+    if (_currentIndex == _kTvIndex && index != _kTvIndex) {
+      _tvLoaded = false;
+    }
     if (_currentIndex == _kPerfilIndex && index != _kPerfilIndex) {
       _perfilLoaded = false;
     }
@@ -866,6 +899,22 @@ class _MainHomeState extends State<MainHome> {
           onRequestMenuFocus: _focusMenu,
           onMainFocusNodeCreated: (node) => _configContentFocusNode = node,
         );
+      case _kDescargasIndex:
+        return _descargasLoaded
+            ? DescargasPageTv(
+                onRequestMenuFocus: _focusMenu,
+                onMainFocusNodeCreated: (node) =>
+                    _descargasContentFocusNode = node,
+              )
+            : const SizedBox.shrink();
+      case _kTvIndex:
+        return _tvLoaded
+            ? TvPlaceholderPage(
+                onRequestMenuFocus: _focusMenu,
+                onMainFocusNodeCreated: (node) =>
+                    _tvContentFocusNode = node,
+              )
+            : const SizedBox.shrink();
       case _kPerfilIndex:
         return _perfilLoaded
             ? PerfilPage(
@@ -1180,8 +1229,21 @@ class _MainHomeState extends State<MainHome> {
                     child: Padding(
                       padding: const EdgeInsets.only(left: _railWidth),
                       child: IndexedStack(
-                        index:
-                            _currentIndex == _kPerfilIndex ? 6 : _currentIndex,
+                        index: () {
+                          // Map logical indices to stack positions
+                          switch (_currentIndex) {
+                            case 0: return 0;
+                            case 1: return 1;
+                            case 2: return 2;
+                            case 3: return 3;
+                            case 4: return 4;
+                            case 5: return 5;
+                            case 6: return 6; // perfil
+                            case 7: return 7; // descargas
+                            case 8: return 8; // tv
+                            default: return 0;
+                          }
+                        }(),
                         children: [
                           _buildPage(0),
                           _buildPage(1),
@@ -1190,6 +1252,8 @@ class _MainHomeState extends State<MainHome> {
                           _buildPage(4),
                           _buildPage(5),
                           _buildPage(_kPerfilIndex),
+                          _buildPage(_kDescargasIndex),
+                          _buildPage(_kTvIndex),
                         ],
                       ),
                     ),
@@ -1209,6 +1273,8 @@ class _MainHomeState extends State<MainHome> {
                       fuentesFocus: _fuentesTabFocusNode,
                       searchFocus: _searchFocusNode,
                       guardadosFocus: _guardadosTabFocusNode,
+                      descargasFocus: _descargasTabFocusNode,
+                      tvFocus: _tvTabFocusNode,
                       settingsFocus: _settingsFocusNode,
                       onKeyEvent: _onMenuKey,
                       onSelect: _enterPage,
@@ -1570,6 +1636,8 @@ class _SideMenu extends StatelessWidget {
   final FocusNode fuentesFocus;
   final FocusNode searchFocus;
   final FocusNode guardadosFocus;
+  final FocusNode descargasFocus;
+  final FocusNode tvFocus;
   final FocusNode settingsFocus;
   final KeyEventResult Function(FocusNode, KeyEvent, int) onKeyEvent;
   final ValueChanged<int> onSelect;
@@ -1585,13 +1653,15 @@ class _SideMenu extends StatelessWidget {
     required this.fuentesFocus,
     required this.searchFocus,
     required this.guardadosFocus,
+    required this.descargasFocus,
+    required this.tvFocus,
     required this.settingsFocus,
     required this.onKeyEvent,
     required this.onSelect,
   });
 
-  static const double _collapsedW = 52;
-  static const double _expandedW = 168;
+  static const double _collapsedW = 42;
+  static const double _expandedW = 140;
 
   @override
   Widget build(BuildContext context) {
@@ -1713,6 +1783,24 @@ class _SideMenu extends StatelessWidget {
                     onKeyEvent: (n, e) => onKeyEvent(n, e, 4),
                     onTap: () => onSelect(4),
                   ),
+                  _SideItem(
+                    expanded: expanded,
+                    icon: Icons.download_rounded,
+                    label: 'Descargas',
+                    focusNode: descargasFocus,
+                    selected: currentIndex == 7,
+                    onKeyEvent: (n, e) => onKeyEvent(n, e, 7),
+                    onTap: () => onSelect(7),
+                  ),
+                  _SideItem(
+                    expanded: expanded,
+                    icon: Icons.tv_rounded,
+                    label: 'TV',
+                    focusNode: tvFocus,
+                    selected: currentIndex == 8,
+                    onKeyEvent: (n, e) => onKeyEvent(n, e, 8),
+                    onTap: () => onSelect(8),
+                  ),
                   const Spacer(),
                   if (expanded && currentTime.isNotEmpty)
                     Padding(
@@ -1778,8 +1866,8 @@ class _SideItem extends StatelessWidget {
 
           return Padding(
             padding: EdgeInsets.symmetric(
-              horizontal: expanded ? 8 : 7,
-              vertical: 2,
+              horizontal: expanded ? 6 : 5,
+              vertical: 1,
             ),
             child: GestureDetector(
               onTap: () {
@@ -1789,8 +1877,8 @@ class _SideItem extends StatelessWidget {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 140),
                 curve: Curves.easeOut,
-                height: expanded ? 40 : 38,
-                padding: EdgeInsets.symmetric(horizontal: expanded ? 10 : 0),
+                height: expanded ? 34 : 32,
+                padding: EdgeInsets.symmetric(horizontal: expanded ? 8 : 0),
                 decoration: BoxDecoration(
                   color: selected
                       ? _kSideAccent
@@ -1837,12 +1925,12 @@ class _SideItem extends StatelessWidget {
                           else
                             Icon(
                               icon,
-                              size: 18,
+                              size: 16,
                               color: selected
                                   ? Colors.white
                                   : Colors.white.withValues(alpha: 0.88),
                             ),
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               label,
@@ -1852,7 +1940,7 @@ class _SideItem extends StatelessWidget {
                                 color: selected
                                     ? Colors.white
                                     : Colors.white.withValues(alpha: 0.9),
-                                fontSize: 13,
+                                fontSize: 12,
                                 fontWeight: selected
                                     ? FontWeight.w700
                                     : FontWeight.w500,
@@ -1881,7 +1969,7 @@ class _SideItem extends StatelessWidget {
                               )
                             : Icon(
                                 icon,
-                                size: 20,
+                                size: 18,
                                 color: selected
                                     ? Colors.white
                                     : Colors.white.withValues(alpha: 0.78),

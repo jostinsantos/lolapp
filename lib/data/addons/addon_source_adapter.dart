@@ -43,9 +43,12 @@ class AddonSourceAdapter {
       try {
         final mgr = AddonManager.instance;
         await mgr.init();
-        final sources = mgr.sourceAddons;
+        // Excluye addons solo-canales (type/capabilities channels) del modal de servidores VOD
+        final sources = mgr.sourceAddons
+            .where((a) => !a.isChannelsOnly)
+            .toList();
         if (sources.isEmpty) {
-          debugPrint('[AddonSourceAdapter] no hay fuentes instaladas');
+          debugPrint('[AddonSourceAdapter] no hay fuentes VOD instaladas');
           return;
         }
 

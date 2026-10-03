@@ -20,6 +20,7 @@ import '../../features/discover/domain/mobile/pag.dart';
 import '../../features/player/presentation/player_page.dart';
 import '../shared/modals/playback_setup_modal.dart';
 import '../../core/constants/versiones.dart';
+import '../../core/utils/display_refresh.dart';
 
 const _kAccentColor = Color(0xFFE50914);
 
@@ -89,6 +90,7 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    DisplayRefresh.requestHighest();
     WidgetsBinding.instance.addObserver(this);
     DownloadNavBus.version.addListener(_onDownloadNavBus);
     _loadContinueItem();
@@ -730,6 +732,38 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
   // NAVEGACIÓN
   // ═══════════════════════════════════════════════════════════════════════
 
+  void _scrollCurrentPageToTop() {
+    // Intenta PrimaryScrollController del contexto del shell o de la página actual
+    final candidates = <BuildContext?>[
+      context,
+      _homeKey.currentContext,
+      _bibliotecaKey.currentContext,
+      _serviciosKey.currentContext,
+    ];
+    for (final ctx in candidates) {
+      if (ctx == null || !ctx.mounted) continue;
+      final primary = PrimaryScrollController.maybeOf(ctx);
+      if (primary != null && primary.hasClients) {
+        primary.animateTo(
+          0,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+        );
+        return;
+      }
+      final scrollable = Scrollable.maybeOf(ctx);
+      if (scrollable != null && scrollable.position.hasContentDimensions) {
+        scrollable.position.animateTo(
+          0,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+        );
+        return;
+      }
+    }
+    // Fallback: notificar a través de un scroll notification no es viable aquí.
+  }
+
   void _selectTab(int index) {
     if (index < 0 || index > _kBuscar) return;
     _forcePortraitIfCurrent();
@@ -1088,7 +1122,8 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
                     _buildCircleNav(
                       icon: _activeIcon,
                       selected: true,
-                      onTap: () {},
+                      // Página actual colapsada: ir al top (no expandir menú)
+                      onTap: _scrollCurrentPageToTop,
                     ),
 
                   // Siempre el de buscar a la derecha

@@ -11,6 +11,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../servers/presentation/tv_servers_modal.dart';
 import '../../player/presentation/tv/tv_player_controller.dart';
 import '../../player/presentation/tv/tv_player_page.dart';
+import '../../downloads/presentation/extractor_download_page_tv.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_content.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_recommendations_api.dart';
 import '../../../supabase/guardados_service.dart';
@@ -102,6 +103,7 @@ class _PageContenidoState extends State<PageContenido>
 
   final FocusNode _playFocusNode = FocusNode();
   final FocusNode _addFocusNode = FocusNode();
+  final FocusNode _downloadFocusNode = FocusNode();
   final FocusNode _randomFocusNode = FocusNode();
   final FocusNode _restartFocusNode = FocusNode();
   final FocusNode _letterboxdFocusNode = FocusNode();
@@ -155,6 +157,7 @@ class _PageContenidoState extends State<PageContenido>
     _hintTimer?.cancel();
     _playFocusNode.dispose();
     _addFocusNode.dispose();
+    _downloadFocusNode.dispose();
     _randomFocusNode.dispose();
     _restartFocusNode.dispose();
     _letterboxdFocusNode.dispose();
@@ -1422,6 +1425,11 @@ class _PageContenidoState extends State<PageContenido>
                             temporada: currentSeasonNumber,
                             capitulo: epNumber,
                           ),
+                          onEpisodeLongPress: (epNumber) =>
+                              _showEpisodeDownloadModal(
+                            temporada: currentSeasonNumber,
+                            capitulo: epNumber,
+                          ),
                           onExitEpisodesView: _exitEpisodesView,
                           onEpisodeFocusChanged: _handleEpisodeFocusChanged,
                           onRequestRecommendations: _enterRecommendationsView,
@@ -1501,10 +1509,22 @@ class _PageContenidoState extends State<PageContenido>
                                 playLabel: playLabel,
                                 playFocusNode: _playFocusNode,
                                 addFocusNode: _addFocusNode,
+                                downloadFocusNode: _downloadFocusNode,
                                 randomFocusNode: _randomFocusNode,
                                 restartFocusNode: _restartFocusNode,
                                 letterboxdFocusNode: _letterboxdFocusNode,
                                 isSaved: isSaved,
+                                onDownload: () {
+                                  if (isMovie) {
+                                    _startDownload();
+                                  } else {
+                                    final temp = currentSeasonNumber;
+                                    final cap = currentEpisodes.isNotEmpty
+                                        ? (currentEpisodes.first['episode_number'] as num?)?.toInt() ?? 1
+                                        : 1;
+                                    _startDownload(temporada: temp, capitulo: cap);
+                                  }
+                                },
                                 showLetterboxd: canShowLetterboxd,
                                 onPlay: () {
                                   if (isMovie) {
@@ -1652,7 +1672,124 @@ class _PageContenidoState extends State<PageContenido>
       ),
     );
   }
+
+  /// Inicia flujo de descarga (TV): SIEMPRE abre ServidoresModalTv en modo
+  /// descarga. No usa caché ni auto-resolve: el usuario elige el servidor.
+  Future<void> _startDownload({int? temporada, int? capitulo}) async {
+    final data = _data;
+    final tipo = data?['type']?.toString() ?? _resolvedMediaType;
+    final titulo = data?['title']?.toString() ?? '';
+
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => ServidoresModalTv(
+        idcontenido: widget.idcontenido,
+        tmdbId: _resolvedTmdbId,
+        temporada: temporada,
+        capitulo: capitulo,
+        titulo: titulo,
+        tipo: tipo,
+        forDownload: true,
+        backdropUrl: _firstUrl(data?['backdrop_path']),
+        posterUrl: _firstUrl(data?['poster_path']),
+        logoUrl: _firstUrl(data?['logo_path']),
+      ),
+    );
+  }
+
+  /// Modal TV con foco para elegir Descargar en un episodio (long-press).
+  Future<void> _showEpisodeDownloadModal({
+    required int temporada,
+    required int capitulo,
+  }) async {
+    final selected = await showDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        final playFocus = FocusNode();
+        final dlFocus = FocusNode();
+        final cancelFocus = FocusNode();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          dlFocus.requestFocus();
+        });
+        return Dialog(
+          backgroundColor: const Color(0xFF1A1A1F),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'T${temporada.toString().padLeft(2, '0')} C${capitulo.toString().padLeft(2, '0')}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '¿Qué quieres hacer?',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.55),
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  _TvModalAction(
+                    focusNode: dlFocus,
+                    label: 'Descargar',
+                    icon: Icons.download_rounded,
+                    primary: true,
+                    onTap: () => Navigator.of(ctx).pop('download'),
+                    onUp: null,
+                    onDown: () => playFocus.requestFocus(),
+                  ),
+                  const SizedBox(height: 10),
+                  _TvModalAction(
+                    focusNode: playFocus,
+                    label: 'Reproducir',
+                    icon: Icons.play_arrow_rounded,
+                    primary: false,
+                    onTap: () => Navigator.of(ctx).pop('play'),
+                    onUp: () => dlFocus.requestFocus(),
+                    onDown: () => cancelFocus.requestFocus(),
+                  ),
+                  const SizedBox(height: 10),
+                  _TvModalAction(
+                    focusNode: cancelFocus,
+                    label: 'Cancelar',
+                    icon: Icons.close_rounded,
+                    primary: false,
+                    onTap: () => Navigator.of(ctx).pop(),
+                    onUp: () => playFocus.requestFocus(),
+                    onDown: null,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!mounted || selected == null) return;
+    if (selected == 'download') {
+      await _startDownload(temporada: temporada, capitulo: capitulo);
+    } else if (selected == 'play') {
+      await _openServidores(temporada: temporada, capitulo: capitulo);
+    }
+  }
+
+
 }
+
 
 /// Spinner de "buscando servidor" mostrado mientras ServerLoader resuelve
 /// la fuente de video. Evita que la app parezca congelada.
@@ -1807,6 +1944,7 @@ class _InfoColumn extends StatelessWidget {
   final String playLabel;
   final FocusNode playFocusNode;
   final FocusNode addFocusNode;
+  final FocusNode downloadFocusNode;
   final FocusNode randomFocusNode;
   final FocusNode restartFocusNode;
   final FocusNode letterboxdFocusNode;
@@ -1814,6 +1952,7 @@ class _InfoColumn extends StatelessWidget {
   final bool showLetterboxd;
   final VoidCallback onPlay;
   final VoidCallback onToggleSaved;
+  final VoidCallback? onDownload;
   final VoidCallback? onRandomEpisode;
   final VoidCallback? onRestart;
   final VoidCallback? onLetterboxd;
@@ -1833,6 +1972,7 @@ class _InfoColumn extends StatelessWidget {
     required this.playLabel,
     required this.playFocusNode,
     required this.addFocusNode,
+    required this.downloadFocusNode,
     required this.randomFocusNode,
     required this.restartFocusNode,
     required this.letterboxdFocusNode,
@@ -1840,6 +1980,7 @@ class _InfoColumn extends StatelessWidget {
     required this.showLetterboxd,
     required this.onPlay,
     required this.onToggleSaved,
+    this.onDownload,
     this.onRandomEpisode,
     this.onRestart,
     this.onLetterboxd,
@@ -1861,6 +2002,16 @@ class _InfoColumn extends StatelessWidget {
         highlighted: isSaved,
         onTap: onToggleSaved,
       ),
+      if (onDownload != null)
+        _SecondaryButtonSpec(
+          focusNode: downloadFocusNode,
+          iconWidget: const Icon(
+            Icons.download_rounded,
+            color: Colors.white,
+            size: 22,
+          ),
+          onTap: onDownload!,
+        ),
       if (onRandomEpisode != null)
         _SecondaryButtonSpec(
           focusNode: randomFocusNode,
@@ -2147,6 +2298,7 @@ class _EpisodesBottomPanel extends StatefulWidget {
   final ScrollController episodeScrollController;
   final ValueChanged<int> onSeasonSelected;
   final ValueChanged<int> onEpisodeTap;
+  final ValueChanged<int>? onEpisodeLongPress;
   final VoidCallback onExitEpisodesView;
   final ValueChanged<Map<String, dynamic>> onEpisodeFocusChanged;
   final VoidCallback? onRequestRecommendations;
@@ -2167,6 +2319,7 @@ class _EpisodesBottomPanel extends StatefulWidget {
     required this.episodeScrollController,
     required this.onSeasonSelected,
     required this.onEpisodeTap,
+    this.onEpisodeLongPress,
     required this.onExitEpisodesView,
     required this.onEpisodeFocusChanged,
     required this.currentSeasonNumber,
@@ -2632,7 +2785,22 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
 
                         if (event.logicalKey == LogicalKeyboardKey.select ||
                             event.logicalKey == LogicalKeyboardKey.enter) {
-                          widget.onEpisodeTap(itemNumber);
+                          if (event is KeyRepeatEvent &&
+                              widget.onEpisodeLongPress != null) {
+                            widget.onEpisodeLongPress!(itemNumber);
+                            return KeyEventResult.handled;
+                          }
+                          if (event is KeyDownEvent) {
+                            widget.onEpisodeTap(itemNumber);
+                            return KeyEventResult.handled;
+                          }
+                          return KeyEventResult.ignored;
+                        }
+                        if ((event.logicalKey == LogicalKeyboardKey.contextMenu ||
+                                event.logicalKey == LogicalKeyboardKey.space) &&
+                            event is KeyDownEvent &&
+                            widget.onEpisodeLongPress != null) {
+                          widget.onEpisodeLongPress!(itemNumber);
                           return KeyEventResult.handled;
                         }
 
@@ -2654,6 +2822,9 @@ class _EpisodesBottomPanelState extends State<_EpisodesBottomPanel> {
                           final hasFocus = Focus.of(context).hasFocus;
                           return GestureDetector(
                             onTap: () => widget.onEpisodeTap(itemNumber),
+                            onLongPress: widget.onEpisodeLongPress != null
+                                ? () => widget.onEpisodeLongPress!(itemNumber)
+                                : null,
                             child: Container(
                               width: _cardWidth,
                               margin: const EdgeInsets.only(right: 14),
@@ -3590,6 +3761,102 @@ class _GuestStarChip extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+
+/// Botón de acción para modales TV (foco D-pad).
+class _TvModalAction extends StatelessWidget {
+  final FocusNode focusNode;
+  final String label;
+  final IconData icon;
+  final bool primary;
+  final VoidCallback onTap;
+  final VoidCallback? onUp;
+  final VoidCallback? onDown;
+
+  const _TvModalAction({
+    required this.focusNode,
+    required this.label,
+    required this.icon,
+    required this.primary,
+    required this.onTap,
+    this.onUp,
+    this.onDown,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      focusNode: focusNode,
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        final key = event.logicalKey;
+        if (key == LogicalKeyboardKey.select ||
+            key == LogicalKeyboardKey.enter) {
+          onTap();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowUp && onUp != null) {
+          onUp!();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowDown && onDown != null) {
+          onDown!();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.escape ||
+            key == LogicalKeyboardKey.goBack) {
+          Navigator.of(context).maybePop();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Builder(
+        builder: (context) {
+          final hasFocus = Focus.of(context).hasFocus;
+          return GestureDetector(
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              height: 48,
+              width: double.infinity,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: primary
+                    ? (hasFocus
+                        ? kAccentColor
+                        : kAccentColor.withValues(alpha: 0.85))
+                    : (hasFocus
+                        ? Colors.white.withValues(alpha: 0.14)
+                        : Colors.white.withValues(alpha: 0.06)),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: hasFocus ? Colors.white : Colors.transparent,
+                  width: 2.2,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, color: Colors.white, size: 22),
+                  const SizedBox(width: 10),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight:
+                          hasFocus ? FontWeight.w700 : FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

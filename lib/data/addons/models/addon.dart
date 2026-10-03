@@ -299,6 +299,61 @@ class AddonManifest extends Equatable {
   bool get hasCapabilityDiscover => capabilities.contains('discover');
   bool get hasCapabilityMeta => capabilities.contains('meta');
   bool get hasCapabilityChannels => capabilities.contains('channels');
+  /// Addon solo de canales en vivo (no sirve para VOD en ServidoresModal).
+  /// Detecta por mode, capabilities o type del manifest (extra).
+  bool get isChannelsOnly {
+    final t = (extra['type'] ?? extra['addonType'] ?? extra['kind'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (t == 'channels' ||
+        t == 'channel' ||
+        t == 'live' ||
+        t == 'tv' ||
+        t == 'iptv' ||
+        t == 'live-tv' ||
+        t == 'livetv') {
+      return true;
+    }
+    final typeList = extra['types'];
+    if (typeList is List) {
+      final lower = typeList.map((e) => e.toString().toLowerCase()).toSet();
+      final channelish = lower.intersection({
+        'channels',
+        'channel',
+        'live',
+        'iptv',
+        'live-tv',
+        'livetv',
+      });
+      final vodish = lower.intersection({
+        'movie',
+        'series',
+        'tv',
+        'vod',
+        'stream',
+        'streams',
+        'anime',
+      });
+      // types solo canales (sin VOD)
+      if (channelish.isNotEmpty && vodish.isEmpty) return true;
+    }
+    if (mode == 'tv') return true;
+    final caps = capabilities;
+    if (caps.contains('channels') &&
+        !caps.any((c) =>
+            c == 'home' ||
+            c == 'search' ||
+            c == 'discover' ||
+            c == 'stream' ||
+            c == 'streams' ||
+            c == 'meta' ||
+            c == 'vod')) {
+      return true;
+    }
+    return false;
+  }
+
   bool get hasCapabilityDownload =>
       capabilities.contains('download') || extra['download'] == true;
   bool get isTvMode => mode == 'tv' || mode == 'both' || hasCapabilityChannels;

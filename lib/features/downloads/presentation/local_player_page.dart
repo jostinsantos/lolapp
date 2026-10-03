@@ -29,6 +29,7 @@ class _LocalPlayerScreenState extends State<LocalPlayerScreen> {
   bool _isPlaying = false;
   bool _controlsLocked = false;
   Timer? _hideTimer;
+  final FocusNode _rootFocus = FocusNode(debugLabel: 'local_player_tv');
 
   @override
   void initState() {
@@ -40,20 +41,37 @@ class _LocalPlayerScreenState extends State<LocalPlayerScreen> {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     WakelockPlus.enable();
     _initPlayer();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _rootFocus.requestFocus();
+    });
   }
 
   Future<void> _initPlayer() async {
     try {
-      final file = File(widget.playlistPath);
+      final path = widget.playlistPath;
+      final file = File(path);
       if (!await file.exists()) {
         setState(() {
           _hasError = true;
-          _errorMsg = 'Archivo no encontrado';
+          _errorMsg = 'Archivo no encontrado:\n$path';
         });
         return;
       }
 
-      final controller = VideoPlayerController.file(file);
+      final lower = path.toLowerCase();
+      final VideoPlayerController controller;
+
+      // HLS local (playlist.m3u8 + segmentos .ts): mejor con URI file://
+      // para que ExoPlayer resuelva los segmentos relativos.
+      if (lower.endsWith('.m3u8')) {
+        controller = VideoPlayerController.networkUrl(
+          Uri.file(path),
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+        );
+      } else {
+        controller = VideoPlayerController.file(file);
+      }
+
       await controller.initialize();
       controller.addListener(_onPlayerUpdate);
       await controller.play();
@@ -66,6 +84,31 @@ class _LocalPlayerScreenState extends State<LocalPlayerScreen> {
       });
       _scheduleHideControls();
     } catch (e) {
+      // Fallback: si networkUrl falla con m3u8, probar file()
+      if (widget.playlistPath.toLowerCase().endsWith('.m3u8')) {
+        try {
+          final controller = VideoPlayerController.file(File(widget.playlistPath));
+          await controller.initialize();
+          controller.addListener(_onPlayerUpdate);
+          await controller.play();
+          if (!mounted) return;
+          setState(() {
+            _controller = controller;
+            _initialized = true;
+            _isPlaying = true;
+            _hasError = false;
+          });
+          _scheduleHideControls();
+          return;
+        } catch (e2) {
+          if (!mounted) return;
+          setState(() {
+            _hasError = true;
+            _errorMsg = e2.toString();
+          });
+          return;
+        }
+      }
       if (!mounted) return;
       setState(() {
         _hasError = true;
@@ -104,7 +147,7 @@ class _LocalPlayerScreenState extends State<LocalPlayerScreen> {
     final dur = _controller!.value.duration;
     var target = pos + Duration(seconds: seconds);
     if (target < Duration.zero) target = Duration.zero;
-    if (target > dur) target = dur;
+    if (dur > Duration.zero && target > dur) target = dur;
     _controller!.seekTo(target);
     _scheduleHideControls();
   }
@@ -121,7 +164,6 @@ class _LocalPlayerScreenState extends State<LocalPlayerScreen> {
 
   void _toggleControls() {
     if (_controlsLocked) {
-      // Bloqueado: solo mostrar el candado un momento para poder desbloquear
       setState(() => _showControls = true);
       _scheduleHideControls();
       return;
@@ -161,6 +203,7 @@ class _LocalPlayerScreenState extends State<LocalPlayerScreen> {
     _hideTimer?.cancel();
     _controller?.removeListener(_onPlayerUpdate);
     _controller?.dispose();
+    _rootFocus.dispose();
     WakelockPlus.disable();
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
@@ -170,203 +213,248 @@ class _LocalPlayerScreenState extends State<LocalPlayerScreen> {
     super.dispose();
   }
 
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.goBack ||
+        key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.browserBack) {
+      Navigator.of(context).maybePop();
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.space ||
+        key == LogicalKeyboardKey.mediaPlayPause) {
+      _togglePlay();
+      _showControlsTemporarily();
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.mediaRewind) {
+      _seekRelative(-10);
+      _showControlsTemporarily();
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.mediaFastForward) {
+      _seekRelative(10);
+      _showControlsTemporarily();
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowDown) {
+      setState(() => _showControls = !_showControls);
+      if (_showControls) _scheduleHideControls();
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  void _showControlsTemporarily() {
+    setState(() => _showControls = true);
+    _scheduleHideControls();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: _hasError
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.error_outline,
-                        color: Colors.redAccent, size: 48),
-                    const SizedBox(height: 16),
-                    Text(
-                      _errorMsg ?? 'Error al reproducir',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                    const SizedBox(height: 24),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Volver'),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : !_initialized
-              ? const Center(
-                  child: CircularProgressIndicator(
-                    color: Colors.white,
-                    strokeWidth: 2.5,
-                  ),
-                )
-              : GestureDetector(
-                  onTap: _toggleControls,
-                  behavior: HitTestBehavior.opaque,
-                  child: Stack(
-                    fit: StackFit.expand,
+    return Focus(
+      focusNode: _rootFocus,
+      onKeyEvent: _onKey,
+      autofocus: true,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: _hasError
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Video
-                      Center(
-                        child: AspectRatio(
-                          aspectRatio: _controller!.value.aspectRatio == 0
-                              ? 16 / 9
-                              : _controller!.value.aspectRatio,
-                          child: VideoPlayer(_controller!),
-                        ),
+                      const Icon(Icons.error_outline,
+                          color: Colors.redAccent, size: 48),
+                      const SizedBox(height: 16),
+                      Text(
+                        _errorMsg ?? 'Error al reproducir',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white70),
                       ),
-
-                      // Controles (se ocultan con el timer, incluido el top bar)
-                      if (_showControls) ...[
-                        // ─── Top bar: solo si NO está bloqueado ────────
-                        if (!_controlsLocked)
-                          Positioned(
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            child: Container(
-                              padding: EdgeInsets.only(
-                                top: MediaQuery.paddingOf(context).top + 4,
-                                left: 8,
-                                right: 8,
-                                bottom: 12,
-                              ),
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    Colors.black.withValues(alpha: 0.75),
-                                    Colors.transparent,
+                      const SizedBox(height: 24),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Volver'),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            : !_initialized
+                ? const Center(
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2.5,
+                    ),
+                  )
+                : GestureDetector(
+                    onTap: _toggleControls,
+                    behavior: HitTestBehavior.opaque,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Center(
+                          child: AspectRatio(
+                            aspectRatio: _controller!.value.aspectRatio == 0
+                                ? 16 / 9
+                                : _controller!.value.aspectRatio,
+                            child: VideoPlayer(_controller!),
+                          ),
+                        ),
+                        if (_showControls) ...[
+                          if (!_controlsLocked)
+                            Positioned(
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              child: Container(
+                                padding: EdgeInsets.only(
+                                  top: MediaQuery.paddingOf(context).top + 4,
+                                  left: 8,
+                                  right: 8,
+                                  bottom: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.black.withValues(alpha: 0.75),
+                                      Colors.transparent,
+                                    ],
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.arrow_back,
+                                          color: Colors.white),
+                                      onPressed: () => Navigator.pop(context),
+                                    ),
+                                    Expanded(
+                                      child: Text(
+                                        widget.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Bloquear controles',
+                                      icon: const Icon(
+                                        Icons.lock_open_rounded,
+                                        color: Colors.white,
+                                      ),
+                                      onPressed: _toggleLock,
+                                    ),
                                   ],
                                 ),
                               ),
+                            ),
+                          if (!_controlsLocked)
+                            Center(
                               child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.arrow_back,
-                                        color: Colors.white),
-                                    onPressed: () => Navigator.pop(context),
+                                  _ControlButton(
+                                    icon: Icons.replay_10_rounded,
+                                    size: 48,
+                                    onTap: () => _seekRelative(-10),
                                   ),
-                                  Expanded(
-                                    child: Text(
-                                      widget.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
+                                  const SizedBox(width: 36),
+                                  _ControlButton(
+                                    icon: _isPlaying
+                                        ? Icons.pause_circle_filled_rounded
+                                        : Icons.play_circle_filled_rounded,
+                                    size: 72,
+                                    onTap: _togglePlay,
                                   ),
-                                  // Candado → bloquear controles
-                                  IconButton(
-                                    tooltip: 'Bloquear controles',
-                                    icon: const Icon(
-                                      Icons.lock_open_rounded,
-                                      color: Colors.white,
-                                    ),
-                                    onPressed: _toggleLock,
+                                  const SizedBox(width: 36),
+                                  _ControlButton(
+                                    icon: Icons.forward_10_rounded,
+                                    size: 48,
+                                    onTap: () => _seekRelative(10),
                                   ),
                                 ],
                               ),
                             ),
-                          ),
-
-                        // ─── Centro (play / seek) ─────────────────────
-                        if (!_controlsLocked)
-                          Center(
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                _ControlButton(
-                                  icon: Icons.replay_10_rounded,
-                                  size: 48,
-                                  onTap: () => _seekRelative(-10),
+                          if (!_controlsLocked)
+                            Positioned(
+                              bottom: 0,
+                              left: 0,
+                              right: 0,
+                              child: Container(
+                                padding: EdgeInsets.fromLTRB(
+                                  16,
+                                  28,
+                                  16,
+                                  12 + MediaQuery.paddingOf(context).bottom,
                                 ),
-                                const SizedBox(width: 36),
-                                _ControlButton(
-                                  icon: _isPlaying
-                                      ? Icons.pause_circle_filled_rounded
-                                      : Icons.play_circle_filled_rounded,
-                                  size: 72,
-                                  onTap: _togglePlay,
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.bottomCenter,
+                                    end: Alignment.topCenter,
+                                    colors: [
+                                      Colors.black.withValues(alpha: 0.85),
+                                      Colors.transparent,
+                                    ],
+                                  ),
                                 ),
-                                const SizedBox(width: 36),
-                                _ControlButton(
-                                  icon: Icons.forward_10_rounded,
-                                  size: 48,
-                                  onTap: () => _seekRelative(10),
-                                ),
-                              ],
-                            ),
-                          ),
-
-                        // ─── Bottom bar (progreso) ────────────────────
-                        if (!_controlsLocked)
-                          Positioned(
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            child: Container(
-                              padding: EdgeInsets.fromLTRB(
-                                16,
-                                28,
-                                16,
-                                12 + MediaQuery.paddingOf(context).bottom,
+                                child: _buildProgressBar(),
                               ),
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.bottomCenter,
-                                  end: Alignment.topCenter,
-                                  colors: [
-                                    Colors.black.withValues(alpha: 0.85),
-                                    Colors.transparent,
-                                  ],
-                                ),
-                              ),
-                              child: _buildProgressBar(),
                             ),
-                          ),
-
-                        // ─── Bloqueado: solo el candado para desbloquear
-                        if (_controlsLocked)
-                          Positioned(
-                            bottom: 24 + MediaQuery.paddingOf(context).bottom,
-                            left: 0,
-                            right: 0,
-                            child: Center(
-                              child: GestureDetector(
-                                onTap: _toggleLock,
-                                child: Container(
-                                  padding: const EdgeInsets.all(14),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.55),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: const Color(0xFFE50914)
-                                          .withValues(alpha: 0.7),
+                          if (_controlsLocked)
+                            Positioned(
+                              bottom:
+                                  24 + MediaQuery.paddingOf(context).bottom,
+                              left: 0,
+                              right: 0,
+                              child: Center(
+                                child: GestureDetector(
+                                  onTap: _toggleLock,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black
+                                          .withValues(alpha: 0.55),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: const Color(0xFFE50914)
+                                            .withValues(alpha: 0.7),
+                                      ),
+                                    ),
+                                    child: const Icon(
+                                      Icons.lock_rounded,
+                                      color: Color(0xFFE50914),
+                                      size: 28,
                                     ),
                                   ),
-                                  child: const Icon(
-                                    Icons.lock_rounded,
-                                    color: Color(0xFFE50914),
-                                    size: 28,
-                                  ),
                                 ),
                               ),
                             ),
-                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
+      ),
     );
   }
 

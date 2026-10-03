@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../../addons/presentation/screens/addons_hub_page.dart';
-import '../../../addons/presentation/screens/nuvio_packages_page.dart';
+import '../../../addons/presentation/screens/tv_addons_actuales_page.dart';
+import '../../../addons/presentation/screens/tv_addons_comunidad_page.dart';
+import '../../../addons/presentation/screens/tv_nuvio_packages_page.dart';
 
-/// Pestaña TV: acceso a Addons actuales y Comunidad.
+/// Pestaña TV: acceso a Addons actuales, Comunidad y Nuvio (páginas 100% TV).
 class TvAddonsTab extends StatefulWidget {
   final VoidCallback? onRequestTabFocus;
 
@@ -66,7 +67,7 @@ class TvAddonsTabState extends State<TvAddonsTab> {
             icon: Icons.extension_rounded,
             title: 'Addons actuales',
             subtitle: 'Ver, activar, actualizar o borrar los instalados',
-            onTap: () => _open(const AddonsActualesPage(isTv: true)),
+            onTap: () => _open(const TvAddonsActualesPage()),
             onUp: widget.onRequestTabFocus,
             onDown: () => _n2.requestFocus(),
           ),
@@ -76,7 +77,7 @@ class TvAddonsTabState extends State<TvAddonsTab> {
             icon: Icons.public_rounded,
             title: 'Comunidad',
             subtitle: 'Descargar fuentes y catálogos desde GitHub (user/repo)',
-            onTap: () => _open(const AddonsComunidadPage(isTv: true)),
+            onTap: () => _open(const TvAddonsComunidadPage()),
             onUp: () => _n1.requestFocus(),
             onDown: () => _n3.requestFocus(),
           ),
@@ -86,7 +87,7 @@ class TvAddonsTabState extends State<TvAddonsTab> {
             icon: Icons.inventory_2_rounded,
             title: 'Addons Nuvio',
             subtitle: 'Manifest URL: cargar scrapers e instalar uno a uno o todos',
-            onTap: () => _open(const NuvioPackagesPage(isTv: true)),
+            onTap: () => _open(const TvNuvioPackagesPage()),
             onUp: () => _n2.requestFocus(),
             onDown: null,
           ),

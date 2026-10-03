@@ -580,50 +580,15 @@ class _PageContenidoState extends State<PageContenido>
       context,
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
-          videoUrl: source?.url ?? '', // ← ahora sí se usa lo resuelto
+          videoUrl: source?.url ?? '',
           idcontenido: _resolvedTmdbId,
           tmdbId: _resolvedTmdbId,
           temporada: isMovie ? null : temporada,
           capitulo: isMovie ? null : capitulo,
           tipo: tipo,
           titulo: titulo,
-          idioma: source?.idioma, // opcional, para la bandera
-          headers: source?.headers, // opcional, para HTTP headers
-        ),
-      ),
-    );
-
-    try {
-      final loader = ServerLoader();
-      await loader.resolvePlayable(
-        // 👈 resuelve el HLS...
-        contentId: _resolvedTmdbId,
-        isMovie: isMovie,
-        season: isMovie ? 0 : (temporada ?? 0),
-        episode: isMovie ? 0 : (capitulo ?? 0),
-        context: mounted ? context : null,
-      );
-    } catch (e) {
-      debugPrint('Precarga ServerLoader: $e');
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _playLoading = false;
-      _loadingEpisodeKey = null;
-    });
-
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PlayerScreen(
-          videoUrl: '', // 👈 ...y lo tira a la basura
-          idcontenido: _resolvedTmdbId,
-          tmdbId: _resolvedTmdbId,
-          temporada: isMovie ? null : temporada,
-          capitulo: isMovie ? null : capitulo,
-          tipo: tipo,
-          titulo: titulo,
+          idioma: source?.idioma,
+          headers: source?.headers,
         ),
       ),
     );

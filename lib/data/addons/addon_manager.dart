@@ -24,6 +24,12 @@ class AddonManager extends ChangeNotifier {
   bool _initialized = false;
 
   List<AddonManifest> get sourceAddons =>
+      addons
+          .where((a) => a.enabled && a.isSource && !a.isChannelsOnly)
+          .toList();
+
+  /// Fuentes instaladas incluyendo solo-canales (para UI de addons, no para ServidoresModal).
+  List<AddonManifest> get sourceAddonsIncludingChannels =>
       addons.where((a) => a.enabled && a.isSource).toList();
 
   List<AddonManifest> get catalogAddons =>
