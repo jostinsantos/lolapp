@@ -1,0 +1,5 @@
+.gradle/
+.dart_tool/
+build/
+*.hprof
+*.apk

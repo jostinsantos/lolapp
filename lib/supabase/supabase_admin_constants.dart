@@ -1,0 +1,4 @@
+
+
+const String kAdminSupabaseUrl = 'https://dstoenhmzetvidnzimbb.supabase.co';
+const String kAdminSupabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRzdG9lbmhtemV0dmlkbnppbWJiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxMDA0MzIsImV4cCI6MjEwNTY3NjQzMn0.Htbw9GE6mWKeMDponTji34pTJZsttvjzkQkay588agA';

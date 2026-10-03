@@ -1,0 +1,10 @@
+{
+  "id": "example.source",
+  "name": "Fuente de ejemplo",
+  "version": "1.0.0",
+  "description": "Manifest JSON de ejemplo (tipo stream). Úsalo como plantilla para crear el tuyo.",
+  "resources": ["stream"],
+  "types": ["movie", "series"],
+  "catalogs": [],
+  "idPrefixes": ["tmdb"]
+}
