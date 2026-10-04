@@ -596,6 +596,7 @@ class Embed69Service {
         'servidor': servidor,
         'url': url,
         'idioma': mapLang[dataLang] ?? 'es_MX',
+      'lang': mapLang[dataLang] ?? 'es_MX',
       });
     }
 
@@ -648,6 +649,7 @@ class Embed69Service {
           'servidor': servidor,
           'url': url,
           'idioma': mapLang[dataLang] ?? 'es_MX',
+      'lang': mapLang[dataLang] ?? 'es_MX',
         });
       }
     }
@@ -782,6 +784,7 @@ class Embed69Server {
       'servidor_url': url,
       'calidad': calidad,
       'idioma': idioma,
+      'lang': idioma,
       'estado': 'activo',
       'es_embed69': true,
       'imdb_id': imdbId,

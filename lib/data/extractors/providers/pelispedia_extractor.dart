@@ -485,6 +485,7 @@ class PelispediaServer {
       'servidor_url': url,
       'calidad': 'HD',
       'idioma': PelispediaService._languageToCode(language),
+      'lang': PelispediaService._languageToCode(language),
       'estado': 'activo',
       'es_pelispedia': true,
       'tmdb_id': tmdbId,

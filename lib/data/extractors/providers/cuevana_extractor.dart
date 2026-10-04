@@ -438,6 +438,7 @@ class CuevanaServer {
       'servidor_url': url,
       'calidad': quality,
       'idioma': idiomaCode,
+      'lang': idiomaCode,
       'estado': 'activo',
       'es_cuevana': true,
       'tmdb_id': tmdbId,

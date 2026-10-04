@@ -89,8 +89,10 @@ class MainFuentesServidores {
           if (url.isEmpty || seen.contains(url)) continue;
           seen.add(url);
 
-          // Normalizar idioma
-          map['idioma'] = _normalizeIdioma(map['idioma']?.toString());
+          // Normalizar idioma + lang (mismo valor, para filtros y UI)
+          map['idioma'] = _normalizeIdioma(
+              map['idioma']?.toString() ?? map['lang']?.toString());
+          map['lang'] = map['idioma'];
           map['fuente'] = fuente;
           map['servicio_origen'] = servicio;
           map['tmdb_id'] = tmdbId;
@@ -202,6 +204,7 @@ class MainFuentesServidores {
             'servidor_url': map['servidor_url'] ?? map['url'] ?? '',
             'calidad': map['quality'] ?? 'HD',
             'idioma': map['idioma'] ?? 'es_MX',
+            'lang': map['idioma'] ?? map['lang'] ?? 'es_MX',
             'estado': 'activo',
             'es_pelisplus': true,
           };

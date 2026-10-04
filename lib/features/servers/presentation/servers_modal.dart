@@ -7,12 +7,44 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../data/aggregators/source_aggregator.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_content.dart';
+import '../../../data/addons/stremio/stream_badge_repository.dart';
 import '../../player/data/extractor.dart';
 import '../../player/presentation/player_page.dart'; // ← ajusta ruta
 import '../../player/presentation/web_player_view.dart'; // WEBVIEW → página dedicada
 import '../../downloads/presentation/extractor_download_page.dart';
 import '../../discover/presentation/source_discovery_page.dart';
 import 'server_preloader_service.dart';
+
+/// Aplica packs de Corriente (Elite-Badges) al texto del servidor.
+Map<String, dynamic> _applyCorrienteBadges(Map<String, dynamic> map) {
+  // Asegura packs cargados (init es sync-safe tras primera await)
+  if (StreamBadgeRepository.instance.packs.isEmpty) {
+    // fire-and-forget; la siguiente apertura ya tendrá packs
+    unawaited(StreamBadgeRepository.instance.init());
+  }
+  final text = [
+    map['servidor_nombre'],
+    map['nombre'],
+    map['calidad'],
+    map['provider'],
+    map['fuente_label'],
+    map['addon_name'],
+  ].whereType<Object?>().map((e) => e.toString()).join(' ');
+  if (text.trim().isEmpty) return map;
+  final badges = StreamBadgeRepository.instance.matchAllBadges(text);
+  if (badges.isEmpty) return map;
+  final out = Map<String, dynamic>.from(map);
+  out['badges'] = badges
+      .map((b) => {
+            if (b.logo != null) 'logo': b.logo,
+            'label': b.label,
+            if (b.groupId != null) 'groupId': b.groupId,
+          })
+      .toList();
+  out['badge_logo'] = badges.first.logo;
+  out['badge_label'] = badges.first.label;
+  return out;
+}
 
 const _kAccent = Color(0xFFE50914);
 const _kOrange = Color(0xFFFF6B00);
@@ -648,6 +680,8 @@ class _ServidoresModalState extends State<ServidoresModal>
 
   void _addServerToBuckets(Map<String, dynamic> map, {FuenteId? eventFuente}) {
     if (!_allowTorrentMkv && _isTorrentOrMkv(map)) return;
+    // Corriente: insignias Elite según nombre/calidad del servidor
+    map = _applyCorrienteBadges(map);
     _todos.add(map);
 
     final fid = map['fuente_id']?.toString() ?? '';
@@ -829,8 +863,9 @@ class _ServidoresModalState extends State<ServidoresModal>
             }
 
             _seenUrls.add(url);
+            final enriched = _applyCorrienteBadges(map);
             setState(() {
-              _addServerToBuckets(map, eventFuente: event.fuente);
+              _addServerToBuckets(enriched, eventFuente: event.fuente);
               _maybeReorderTabs();
             });
             // Guardar en caché YA (uno a uno), sin esperar el final
@@ -1718,6 +1753,18 @@ class _ServidoresModalState extends State<ServidoresModal>
     final fuenteLabel = s['fuente_label']?.toString();
     final idioma = MainFuentes.normalizeIdioma(s['idioma']?.toString());
     final esPlayer = _esPlayer(s);
+    final badgeList = <Map<String, dynamic>>[];
+    final rawBadges = s['badges'];
+    if (rawBadges is List) {
+      for (final b in rawBadges) {
+        if (b is Map) badgeList.add(Map<String, dynamic>.from(b));
+      }
+    } else if (s['badge_logo'] != null) {
+      badgeList.add({
+        'logo': s['badge_logo'],
+        'label': s['badge_label'] ?? '',
+      });
+    }
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -1747,6 +1794,40 @@ class _ServidoresModalState extends State<ServidoresModal>
                           fontWeight: FontWeight.w700,
                         ),
                       ),
+                      if (badgeList.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        SizedBox(
+                          height: 18,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: badgeList.length.clamp(0, 8),
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(width: 4),
+                            itemBuilder: (_, i) {
+                              final b = badgeList[i];
+                              final logo = b['logo']?.toString();
+                              final label = b['label']?.toString() ?? '';
+                              if (logo != null && logo.isNotEmpty) {
+                                return CachedNetworkImage(
+                                  imageUrl: logo,
+                                  height: 16,
+                                  fit: BoxFit.contain,
+                                  errorWidget: (_, __, ___) => Text(
+                                    label,
+                                    style: const TextStyle(
+                                        color: Colors.white54, fontSize: 10),
+                                  ),
+                                );
+                              }
+                              return Text(
+                                label,
+                                style: const TextStyle(
+                                    color: Colors.white54, fontSize: 10),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 4),
                       Row(
                         children: [

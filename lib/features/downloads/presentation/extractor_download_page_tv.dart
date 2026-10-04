@@ -125,8 +125,12 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
   /// Hilos de descarga seleccionados (1-8)
   int _selectedConcurrency = 4;
 
+  /// Descargar también subtítulos desde la API
+  bool _downloadSubtitles = true;
+
   // Foco TV
   final FocusNode _backFocus = FocusNode(debugLabel: 'ext_tv_back');
+  final FocusNode _subsDlFocus = FocusNode(debugLabel: 'ext_tv_subs_dl');
   final FocusNode _downloadFocus = FocusNode(debugLabel: 'ext_tv_dl');
   final FocusNode _idmFocus = FocusNode(debugLabel: 'ext_tv_idm');
   final FocusNode _concurrencyFocus = FocusNode(debugLabel: 'ext_tv_threads');
@@ -162,6 +166,7 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
     _stopDetectionJs();
     _dm.removeListener(_onDmUpdate);
     _backFocus.dispose();
+    _subsDlFocus.dispose();
     _downloadFocus.dispose();
     _idmFocus.dispose();
     _concurrencyFocus.dispose();
@@ -778,25 +783,37 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
       _searchTimer?.cancel();
       _stopDetectionJs();
 
+      final tmdb = widget.tmdbId ?? widget.idcontenido;
+      String? subUrl;
+      if (_downloadSubtitles && tmdb > 0) {
+        // API de subtítulos (mismo endpoint que el player)
+        subUrl = 'https://modlyo.com/subtitulo/contenido/$tmdb/es_MX.vtt';
+      }
       await _dm.startHlsDownload(
         m3u8Url: url,
         headers: _downloadHeaders(url),
         titulo: widget.titulo,
         temporada: widget.temporada,
         capitulo: widget.capitulo,
-        tmdbId: widget.tmdbId ?? widget.idcontenido,
+        tmdbId: tmdb,
         tipo: widget.tipo,
         posterUrl: widget.posterUrl,
         backdropUrl: widget.backdropUrl,
+        subtitleUrl: subUrl,
       );
 
       if (!mounted) return;
 
-      // Igual que móvil: ir a la página de descargas para que continúe
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const DescargasPageTv()),
-        (route) => route.isFirst,
+      // La descarga sigue en background (DownloadManager + foreground service).
+      // Volvemos al contenido de origen para poder seguir navegando.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Descarga iniciada · puedes seguir navegando'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 3),
+        ),
       );
+      Navigator.of(context).pop();
     } catch (e) {
       _isClosing = false;
       _detectionStopped = false;
@@ -1048,7 +1065,7 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowDown) {
-          _concurrencyFocus.requestFocus();
+          _subsDlFocus.requestFocus();
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowUp) {
@@ -1133,11 +1150,7 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowUp) {
-          if (_qualityFocusNodes.isNotEmpty) {
-            _focusQualities();
-          } else {
-            _backFocus.requestFocus();
-          }
+          _subsDlFocus.requestFocus();
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
@@ -1265,7 +1278,101 @@ class _ExtractorDownloadPageTvState extends State<ExtractorDownloadPageTv>
               runSpacing: 8,
               children: List.generate(_qualities.length, _buildQualityChip),
             ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
+          // Toggle subtítulos (ancho completo, fuera del Row de hilos)
+          Focus(
+            focusNode: _subsDlFocus,
+            onKeyEvent: (n, event) {
+              if (event is! KeyDownEvent) return KeyEventResult.ignored;
+              final key = event.logicalKey;
+              if (key == LogicalKeyboardKey.select ||
+                  key == LogicalKeyboardKey.enter) {
+                setState(() => _downloadSubtitles = !_downloadSubtitles);
+                return KeyEventResult.handled;
+              }
+              if (key == LogicalKeyboardKey.arrowDown) {
+                _concurrencyFocus.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (key == LogicalKeyboardKey.arrowUp) {
+                if (_qualityFocusNodes.isNotEmpty) {
+                  final idx = _qualities.indexWhere(
+                      (q) => q.url == selectedQualityUrl);
+                  final i = idx >= 0 ? idx : 0;
+                  if (i < _qualityFocusNodes.length) {
+                    _qualityFocusNodes[i].requestFocus();
+                  }
+                }
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            },
+            child: Builder(builder: (ctx) {
+              final has = Focus.of(ctx).hasFocus;
+              return GestureDetector(
+                onTap: () =>
+                    setState(() => _downloadSubtitles = !_downloadSubtitles),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: has
+                        ? _kAccent.withValues(alpha: 0.15)
+                        : Colors.white.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: has ? _kAccent : Colors.transparent,
+                      width: 2,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _downloadSubtitles
+                            ? Icons.closed_caption_rounded
+                            : Icons.closed_caption_disabled_rounded,
+                        color: _downloadSubtitles ? _kAccent : Colors.white38,
+                        size: 22,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Descargar subtítulos',
+                              style: TextStyle(
+                                color: has ? Colors.white : Colors.white70,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              _downloadSubtitles
+                                  ? 'Se guardarán junto al video (API subtítulos)'
+                                  : 'Solo se descarga el video',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.4),
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: _downloadSubtitles,
+                        activeColor: _kAccent,
+                        onChanged: (v) =>
+                            setState(() => _downloadSubtitles = v),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,

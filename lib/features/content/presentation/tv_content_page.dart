@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import '../../foryou/presentation/like_button.dart';
+import '../../../data/recommendations/user_taste_profile.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -107,6 +109,8 @@ class _PageContenidoState extends State<PageContenido>
   final FocusNode _randomFocusNode = FocusNode();
   final FocusNode _restartFocusNode = FocusNode();
   final FocusNode _letterboxdFocusNode = FocusNode();
+  final FocusNode _likeFocusNode = FocusNode();
+  bool _liked = false;
   List<FocusNode> _seasonFocusNodes = [];
   List<FocusNode> _episodeFocusNodes = [];
   List<FocusNode> _recoFocusNodes = [];
@@ -148,6 +152,35 @@ class _PageContenidoState extends State<PageContenido>
     _fetchContent();
   }
 
+
+  Future<void> _loadLikeState() async {
+    final id = _resolvedTmdbId;
+    if (id <= 0) return;
+    final p = await UserTasteProfile.load();
+    if (mounted) setState(() => _liked = p.isLiked(id));
+  }
+
+  Future<void> _toggleLike() async {
+    final id = _resolvedTmdbId;
+    if (id <= 0) return;
+    final p = await UserTasteProfile.load();
+    final title = (_data?['title'] ?? _data?['name'] ?? '').toString();
+    final genres = ((_data?['genres'] as List?) ?? [])
+        .map((g) => (g is Map ? g['name'] : g).toString())
+        .toList();
+    if (_liked) {
+      await p.unlikeContent(id);
+    } else {
+      await p.likeContent(
+        tmdbId: id,
+        title: title,
+        type: _resolvedMediaType,
+        genres: genres,
+      );
+    }
+    if (mounted) setState(() => _liked = !_liked);
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -161,6 +194,7 @@ class _PageContenidoState extends State<PageContenido>
     _randomFocusNode.dispose();
     _restartFocusNode.dispose();
     _letterboxdFocusNode.dispose();
+    _likeFocusNode.dispose();
     _episodeScrollController.dispose();
     _recoScrollController.dispose();
     _isSavedNotifier.dispose();
@@ -1385,6 +1419,8 @@ class _PageContenidoState extends State<PageContenido>
 
           const _ContenidoOverlayGradient(),
 
+          // Me gusta ahora está en la barra de botones (junto a Letterboxd)
+
           SafeArea(
             child: recoViewActive
                 ? Padding(
@@ -1513,13 +1549,16 @@ class _PageContenidoState extends State<PageContenido>
                                 randomFocusNode: _randomFocusNode,
                                 restartFocusNode: _restartFocusNode,
                                 letterboxdFocusNode: _letterboxdFocusNode,
+                                likeFocusNode: _likeFocusNode,
                                 isSaved: isSaved,
+                                liked: _liked,
                                 // Solo descarga en películas (no en series)
                                 onDownload: isMovie
                                     ? () {
                                         _startDownload();
                                       }
                                     : null,
+                                onToggleLike: _toggleLike,
                                 showLetterboxd: canShowLetterboxd,
                                 onPlay: () {
                                   if (isMovie) {
@@ -1940,10 +1979,13 @@ class _InfoColumn extends StatelessWidget {
   final FocusNode randomFocusNode;
   final FocusNode restartFocusNode;
   final FocusNode letterboxdFocusNode;
+  final FocusNode? likeFocusNode;
   final bool isSaved;
+  final bool liked;
   final bool showLetterboxd;
   final VoidCallback onPlay;
   final VoidCallback onToggleSaved;
+  final VoidCallback? onToggleLike;
   final VoidCallback? onDownload;
   final VoidCallback? onRandomEpisode;
   final VoidCallback? onRestart;
@@ -1968,10 +2010,13 @@ class _InfoColumn extends StatelessWidget {
     required this.randomFocusNode,
     required this.restartFocusNode,
     required this.letterboxdFocusNode,
+    this.likeFocusNode,
     required this.isSaved,
+    this.liked = false,
     required this.showLetterboxd,
     required this.onPlay,
     required this.onToggleSaved,
+    this.onToggleLike,
     this.onDownload,
     this.onRandomEpisode,
     this.onRestart,
@@ -2036,6 +2081,18 @@ class _InfoColumn extends StatelessWidget {
             },
           ),
           onTap: onLetterboxd!,
+        ),
+      // Me gusta — junto a Letterboxd en la barra de botones (no tapado)
+      if (onToggleLike != null && likeFocusNode != null)
+        _SecondaryButtonSpec(
+          focusNode: likeFocusNode!,
+          iconWidget: Icon(
+            liked ? Icons.favorite : Icons.favorite_border,
+            color: liked ? Colors.pinkAccent : Colors.white,
+            size: 22,
+          ),
+          highlighted: liked,
+          onTap: onToggleLike!,
         ),
     ];
 

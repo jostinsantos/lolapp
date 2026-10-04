@@ -130,6 +130,8 @@ class StreamItem extends Equatable {
   final Map<String, String> headers;
   final bool isHls;
   final String? infoHash; // torrent / magnet
+  /// Código de idioma del servidor (es_MX, es_ES, en_US, …).
+  final String? lang;
 
   const StreamItem({
     required this.url,
@@ -140,6 +142,7 @@ class StreamItem extends Equatable {
     this.headers = const {},
     this.isHls = false,
     this.infoHash,
+    this.lang,
   });
 
   bool get isTorrent =>
@@ -161,6 +164,11 @@ class StreamItem extends Equatable {
     final finalUrl = url.isNotEmpty
         ? url
         : (magnet ?? (infoHash != null ? 'magnet:?xt=urn:btih:$infoHash' : ''));
+    final langRaw = (json['lang'] ??
+            json['language'] ??
+            json['idioma'] ??
+            json['audio'])
+        ?.toString();
     return StreamItem(
       url: finalUrl,
       title: json['title'] as String? ?? json['name'] as String? ?? 'Stream',
@@ -170,6 +178,7 @@ class StreamItem extends Equatable {
       headers: headers,
       isHls: finalUrl.contains('.m3u8') || (json['isHls'] as bool? ?? false),
       infoHash: infoHash,
+      lang: (langRaw != null && langRaw.isNotEmpty) ? langRaw : null,
     );
   }
 
@@ -182,10 +191,11 @@ class StreamItem extends Equatable {
         'headers': headers,
         'isHls': isHls,
         'infoHash': infoHash,
+        if (lang != null) 'lang': lang,
       };
 
   @override
-  List<Object?> get props => [url, quality];
+  List<Object?> get props => [url, quality, lang];
 }
 
 /// Subtítulo.

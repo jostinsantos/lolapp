@@ -18,6 +18,7 @@ import 'widgets/mobile_skip_next_overlay.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_player_api.dart';
 import 'player_controller.dart'; // Módulo independiente de servidores / HLS
 import 'widgets/mini_player_service.dart';
+import '../../../supabase/supabase_data.dart';
 
 class _SubtitleCue {
   final Duration start;
@@ -85,6 +86,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _showControls = true;
   bool _isBuffering = false;
   Timer? _hideControlsTimer;
+  Timer? _cacheTimer;
   bool _isDragging = false;
   bool _isDisposing = false;
   bool _controllerReady = false;
@@ -329,6 +331,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final prefs = await SharedPreferences.getInstance();
     final pos = _controller.value.position.inSeconds;
+    final dur = _controller.value.duration.inSeconds;
 
     String? backdrop = _backdropUrl;
     if (_apiData != null) {
@@ -336,15 +339,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (b is String && b.isNotEmpty) backdrop = b;
     }
 
+    final titulo =
+        _tituloContenido.isNotEmpty ? _tituloContenido : widget.titulo;
+
     final full = {
       'idcontenido': _resolvedId,
       'temporada': widget.temporada,
       'capitulo': widget.capitulo,
       'segundo': pos,
-      'titulo': _tituloContenido.isNotEmpty ? _tituloContenido : widget.titulo,
+      'titulo': titulo,
       'tipo': _mediaType,
       'videoUrl': _activeUrl.isNotEmpty ? _activeUrl : widget.videoUrl,
       'backdrop': backdrop ?? '',
+      'duration': dur,
       'timestamp': DateTime.now().toIso8601String(),
     };
     await prefs.setString(_getCacheKey(), jsonEncode(full));
@@ -360,16 +367,118 @@ class _PlayerScreenState extends State<PlayerScreen> {
     GuardadosBus.bump();
   }
 
-  Future<int?> _getSavedPosition() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_getCacheKeyRapido());
-    if (raw == null) return null;
+  /// Guarda en Supabase (o cache local si invitado) al salir del reproductor.
+  Future<void> _saveHistorialToDb() async {
+    if (!_controllerReady || !_controller.value.isInitialized) return;
     try {
-      final data = jsonDecode(raw);
-      return data['segundo'] as int?;
-    } catch (_) {
-      return null;
+      final pos = _controller.value.position.inSeconds;
+      final dur = _controller.value.duration.inSeconds;
+      if (pos < 5) return; // no guardar si apenas empezó
+
+      String? backdrop = _backdropUrl;
+      if (_apiData != null) {
+        final b = _apiData!['backdrop'] ?? _apiData!['backdrop_path'];
+        if (b is String && b.isNotEmpty) backdrop = b;
+      }
+      // Normalizar a URL completa
+      if (backdrop != null &&
+          backdrop.isNotEmpty &&
+          !backdrop.startsWith('http')) {
+        final path = backdrop.startsWith('/') ? backdrop : '/$backdrop';
+        backdrop = 'https://image.tmdb.org/t/p/w780$path';
+      }
+      final titulo =
+          _tituloContenido.isNotEmpty ? _tituloContenido : widget.titulo;
+      String? poster;
+      if (_apiData != null) {
+        poster = (_apiData!['poster'] ?? _apiData!['poster_path'])?.toString();
+      }
+      if (poster != null && poster.isNotEmpty && !poster.startsWith('http')) {
+        final path = poster.startsWith('/') ? poster : '/$poster';
+        poster = 'https://image.tmdb.org/t/p/w500$path';
+      }
+
+      await SupabaseData.saveHistorial(
+        tmdbId: _resolvedId,
+        poster: poster,
+        tipo: _mediaType,
+        progressSeconds: pos,
+        season: _mediaType == 'tv' ? widget.temporada : null,
+        episode: _mediaType == 'tv' ? widget.capitulo : null,
+        titulo: titulo,
+        backdrop: backdrop,
+        durationSeconds: dur > 0 ? dur : null,
+      );
+    } catch (e) {
+      debugPrint('[Player] saveHistorialToDb: $e');
     }
+  }
+
+  void _startCacheTimer() {
+    _cacheTimer?.cancel();
+    _cacheTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted && _isPlaying) _saveCache();
+    });
+  }
+
+  /// Posición guardada: primero cache local, si no → historial Supabase.
+  Future<int?> _getSavedPosition() async {
+    // 1) Cache rápido local
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_getCacheKeyRapido());
+      if (raw != null) {
+        final data = jsonDecode(raw);
+        final sec = data['segundo'] as int?;
+        if (sec != null && sec > 5) return sec;
+      }
+      // También la clave completa
+      final fullRaw = prefs.getString(_getCacheKey());
+      if (fullRaw != null) {
+        final data = jsonDecode(fullRaw);
+        final sec = data['segundo'] as int?;
+        if (sec != null && sec > 5) return sec;
+      }
+    } catch (_) {}
+
+    // 2) Historial Supabase (o local_historial si invitado)
+    try {
+      final list = await SupabaseData.getHistorial();
+      final id = _resolvedId;
+      final tipo = _mediaType;
+      for (final e in list) {
+        final tid = e['tmdb_id'] ?? e['idcontenido'];
+        final eid = tid is int ? tid : int.tryParse('$tid') ?? 0;
+        if (eid != id) continue;
+        final et = (e['tipo'] ?? 'movie').toString().toLowerCase();
+        final isTv = et.contains('tv') || et.contains('serie');
+        if (tipo == 'tv' && !isTv) continue;
+        if (tipo != 'tv' && isTv) continue;
+        if (tipo == 'tv') {
+          final s = e['season'] ?? e['temporada'];
+          final ep = e['episode'] ?? e['capitulo'];
+          final sInt = s is int ? s : int.tryParse('$s');
+          final eInt = ep is int ? ep : int.tryParse('$ep');
+          if (widget.temporada != null &&
+              sInt != null &&
+              sInt != widget.temporada &&
+              sInt != 0) {
+            continue;
+          }
+          if (widget.capitulo != null &&
+              eInt != null &&
+              eInt != widget.capitulo &&
+              eInt != 0) {
+            continue;
+          }
+        }
+        final sec = e['progress_seconds'] as int? ?? e['segundo'] as int? ?? 0;
+        if (sec > 5) return sec;
+      }
+    } catch (e) {
+      debugPrint('[Player] getSavedPosition supabase: $e');
+    }
+    return null;
   }
 
   // ─── Cargar datos desde TMDB ────────────────────────────────────────────
@@ -1012,6 +1121,7 @@ if (passed.isNotEmpty) {
 
       _controller.addListener(_videoListener);
       _controllerReady = true;
+      _startCacheTimer();
 
       final saved = await _getSavedPosition();
       if (saved != null && saved > 5) {
@@ -1827,7 +1937,9 @@ if (passed.isNotEmpty) {
   Future<void> _showExitConfirmation() async {
     final wasPlaying = _isPlaying;
     if (_isPlaying) _controller.pause();
+    // Guardar cache + Supabase ANTES de salir (await para no perder el write)
     await _saveCache();
+    await _saveHistorialToDb();
 
     final bool? confirm = await showDialog<bool>(
       context: context,
@@ -1860,7 +1972,7 @@ if (passed.isNotEmpty) {
     );
 
     if (confirm == true && mounted) {
-      // Restaurar UI aquí; dispose también lo hará si es el último player
+      // Ya guardado arriba; dispose no necesita rehacer el write crítico
       _restoreSystemUi();
       WakelockPlus.disable();
       Navigator.pop(context);
@@ -1949,9 +2061,18 @@ if (passed.isNotEmpty) {
   void dispose() {
     _isDisposing = true;
     _hideControlsTimer?.cancel();
+    _cacheTimer?.cancel();
     _positionNotifier.dispose();
 
-    _saveCache();
+    // Backup: si se salió sin pasar por _showExitConfirmation, intentar guardar.
+    // dispose() no puede ser async; usamos then para no bloquear el árbol.
+    final saveFuture = Future.wait([
+      _saveCache(),
+      _saveHistorialToDb(),
+    ]);
+    // Mantener el future vivo un momento (evita GC antes de completar el write)
+    saveFuture.then((_) {}).catchError((_) {});
+
     if (_controllerReady) {
       _controller.removeListener(_videoListener);
       _controller.dispose();

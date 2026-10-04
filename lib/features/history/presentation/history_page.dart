@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../content/presentation/tv_content_page.dart';
 import '../../player/presentation/tv/tv_player_page.dart';
 import '../../content/presentation/tv_content_options_modal.dart';
+import '../../../supabase/supabase_data.dart';
 
 const _kAccentColor = Color(0xFFFF6B00);
 const _kBg = Color(0xFF0A0A0A);
@@ -239,44 +240,110 @@ class GuardadosPageState extends State<GuardadosPage>
     }
   }
 
+  /// Historial desde Supabase (logueado) o cache local (invitado).
   Future<List<Map<String, dynamic>>> _loadHistorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final keys =
-        prefs.getKeys().where((k) => k.startsWith('cachePlayer_')).toList();
+    try {
+      final list = await SupabaseData.getHistorial();
+      final result = <Map<String, dynamic>>[];
 
-    final List<Map<String, dynamic>> result = [];
+      for (final raw in list) {
+        final data = Map<String, dynamic>.from(raw);
+        final tmdbId = data['tmdb_id'] ?? data['idcontenido'] ?? 0;
+        final id = tmdbId is int ? tmdbId : int.tryParse('$tmdbId') ?? 0;
+        if (id <= 0) continue;
 
-    for (final key in keys) {
-      try {
-        final raw = prefs.getString(key);
-        if (raw == null) continue;
-        final data = Map<String, dynamic>.from(jsonDecode(raw));
+        final segundo = data['progress_seconds'] as int? ??
+            data['segundo'] as int? ??
+            0;
+        if (segundo < 5) continue;
 
-        final segundo = data['segundo'] as int? ?? 0;
-        if (segundo < 8) continue;
+        final tipo = (data['tipo'] ?? 'movie').toString().toLowerCase();
+        final isTv = tipo.contains('tv') || tipo.contains('serie');
+        int? season = data['season'] is int
+            ? data['season'] as int
+            : int.tryParse('${data['season'] ?? data['temporada'] ?? ''}');
+        int? episode = data['episode'] is int
+            ? data['episode'] as int
+            : int.tryParse('${data['episode'] ?? data['capitulo'] ?? ''}');
+        if (!isTv || season == 0) season = null;
+        if (!isTv || episode == 0) episode = null;
 
-        result.add(data);
-      } catch (_) {}
+        // Poster: URL completa de Supabase o path relativo → full URL
+        String poster = '';
+        for (final key in [
+          'poster',
+          'poster_path',
+          'posterUrl',
+          'backdrop',
+          'backdrop_path',
+        ]) {
+          final v = data[key]?.toString() ?? '';
+          if (v.isEmpty) continue;
+          if (v.startsWith('http://') || v.startsWith('https://')) {
+            poster = v;
+            break;
+          }
+          if (v.startsWith('/')) {
+            poster = 'https://image.tmdb.org/t/p/w500$v';
+            break;
+          }
+          if (v.contains('.') && !v.contains(' ')) {
+            poster =
+                'https://image.tmdb.org/t/p/w500/${v.startsWith('/') ? v.substring(1) : v}';
+            break;
+          }
+        }
+
+        result.add({
+          ...data,
+          'idcontenido': id,
+          'tmdb_id': id,
+          'segundo': segundo,
+          'progress_seconds': segundo,
+          'temporada': season,
+          'capitulo': episode,
+          'tipo': tipo,
+          'titulo': data['titulo']?.toString() ??
+              data['title']?.toString() ??
+              '',
+          'poster': poster,
+          'backdrop': data['backdrop']?.toString() ?? poster,
+          'duration': data['duration_seconds'] ?? data['duration'],
+          'timestamp': data['updated_at']?.toString() ??
+              data['created_at']?.toString() ??
+              data['timestamp']?.toString() ??
+              '',
+        });
+      }
+
+      result.sort((a, b) {
+        final ta = a['timestamp']?.toString() ?? '';
+        final tb = b['timestamp']?.toString() ?? '';
+        return tb.compareTo(ta);
+      });
+      return result;
+    } catch (e) {
+      debugPrint('[GuardadosTV] _loadHistorial error: $e');
+      return [];
     }
-
-    result.sort((a, b) {
-      final ta = a['timestamp']?.toString() ?? '';
-      final tb = b['timestamp']?.toString() ?? '';
-      return tb.compareTo(ta);
-    });
-
-    return result;
   }
 
   void _openHistorial(Map<String, dynamic> item) {
     if (_ignoreSelectUntil) return;
 
-    final id = item['idcontenido'] as int? ?? 0;
+    final rawId = item['idcontenido'] ?? item['tmdb_id'] ?? 0;
+    final id = rawId is int ? rawId : int.tryParse('$rawId') ?? 0;
     if (id <= 0) return;
 
-    final temporada = item['temporada'] as int?;
-    final capitulo = item['capitulo'] as int?;
-    final tmdbId = item['tmdb_id'] as int? ?? id;
+    final temporada = item['temporada'] is int
+        ? item['temporada'] as int
+        : int.tryParse('${item['temporada'] ?? ''}');
+    final capitulo = item['capitulo'] is int
+        ? item['capitulo'] as int
+        : int.tryParse('${item['capitulo'] ?? ''}');
+    final tmdbId = item['tmdb_id'] is int
+        ? item['tmdb_id'] as int
+        : int.tryParse('${item['tmdb_id'] ?? id}') ?? id;
     final tipo = normalizeMediaType(
       item['tipo'] ?? item['media_type'] ?? item['type'],
     );
@@ -422,11 +489,35 @@ class GuardadosPageState extends State<GuardadosPage>
   }
 
   void _moveFocus(int section, int index, int dx, int dy) {
+    // ── Flecha izquierda en el primer item de cualquier sección → menú ──
     if (dx < 0 && index <= 0) {
       _goMenu();
       return;
     }
 
+    // ── Flecha arriba ───────────────────────────────────────────────────
+    if (dy < 0) {
+      if (section == 0) {
+        // Ya estamos en la fila superior → ir al menú
+        _goMenu();
+        return;
+      }
+      if (section == 1) {
+        // Si hay historial subir a historial; si no, ir al menú
+        if (_historialNodes.isNotEmpty) {
+          final i = _lastHistIndex.clamp(0, _historialNodes.length - 1);
+          _armIgnoreSelect(ms: 200);
+          _historialNodes[i].requestFocus();
+          _scrollHorizontal(_historialScroll, i, 280);
+          _ensureSectionVisible(_historialSectionKey);
+        } else {
+          _goMenu();
+        }
+        return;
+      }
+    }
+
+    // ── Sección 0: Continuar viendo ─────────────────────────────────────
     if (section == 0) {
       final nodes = _historialNodes;
 
@@ -437,11 +528,11 @@ class GuardadosPageState extends State<GuardadosPage>
           _guardadosNodes[i].requestFocus();
           _scrollHorizontal(_guardadosScroll, i, 145);
           _ensureSectionVisible(_guardadosSectionKey);
+        } else {
+          _goMenu();
         }
         return;
       }
-
-      if (dy < 0) return;
 
       if (nodes.isEmpty) return;
       final newIndex = (index + dx).clamp(0, nodes.length - 1);
@@ -455,21 +546,15 @@ class GuardadosPageState extends State<GuardadosPage>
       return;
     }
 
+    // ── Sección 1: Mi lista ─────────────────────────────────────────────
     if (section == 1) {
       final nodes = _guardadosNodes;
 
-      if (dy < 0) {
-        if (_historialNodes.isNotEmpty) {
-          final i = _lastHistIndex.clamp(0, _historialNodes.length - 1);
-          _armIgnoreSelect(ms: 200);
-          _historialNodes[i].requestFocus();
-          _scrollHorizontal(_historialScroll, i, 280);
-          _ensureSectionVisible(_historialSectionKey);
-        }
+      if (dy > 0) {
+        // No hay nada más abajo → al menú
+        _goMenu();
         return;
       }
-
-      if (dy > 0) return;
 
       if (nodes.isEmpty) return;
       final newIndex = (index + dx).clamp(0, nodes.length - 1);

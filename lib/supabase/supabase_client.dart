@@ -1,91 +1,49 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'supabase_config.dart';
+import 'supabase_constants.dart';
 
-/// Cliente singleton de Supabase (proyecto del USUARIO).
+/// Cliente central de Supabase.
+/// Se inicializa una sola vez con las credenciales fijas del desarrollador.
 class AppSupabase {
   static SupabaseClient? _client;
   static bool _initialized = false;
-  static String? _lastUrl;
-  static String? _lastKey;
 
   static SupabaseClient? get client => _client;
   static bool get isInitialized => _initialized && _client != null;
 
-  static Future<bool> init() async {
+  /// Inicializa el cliente (llamar al arrancar la app).
+  static Future<void> init() async {
+    if (_initialized && _client != null) return;
+
+    if (!isSupabaseConfigured) {
+      _client = null;
+      _initialized = false;
+      return;
+    }
+
     try {
-      final url = await SupabaseConfig.getUrl();
-      final key = await SupabaseConfig.getAnonKey();
-
-      if (url == null || url.isEmpty || key == null || key.isEmpty) {
-        _client = null;
-        _initialized = false;
-        return false;
-      }
-
-      // Si ya está inicializado con los mismos valores, reutilizar
-      if (_initialized &&
-          _client != null &&
-          _lastUrl == url &&
-          _lastKey == key) {
-        return true;
-      }
-
-      // Supabase.initialize solo se puede llamar una vez por proceso.
-      // Si cambia URL/KEY, usamos SupabaseClient directo.
-      try {
-        if (!_initialized) {
-          await Supabase.initialize(
-            url: url,
-            anonKey: key,
-            debug: false,
-          );
-          _client = Supabase.instance.client;
-        } else {
-          _client = SupabaseClient(url, key);
-        }
-      } catch (_) {
-        // Ya inicializado globalmente o error: cliente directo
-        _client = SupabaseClient(url, key);
-      }
-
-      _lastUrl = url;
-      _lastKey = key;
+      await Supabase.initialize(
+        url: kSupabaseUrl.trim(),
+        anonKey: kSupabaseAnonKey.trim(),
+        authOptions: const FlutterAuthClientOptions(
+          authFlowType: AuthFlowType.pkce,
+        ),
+      );
+      _client = Supabase.instance.client;
       _initialized = true;
-      return true;
     } catch (_) {
       _client = null;
       _initialized = false;
-      return false;
     }
   }
 
-  static Future<bool> reinit() async {
-    _client = null;
-    _initialized = false;
-    _lastUrl = null;
-    _lastKey = null;
-    return init();
-  }
+  /// Usuario de Auth actual (cuenta)
+  static User? get currentUser => _client?.auth.currentUser;
 
-  /// Prueba conexión sin lanzar excepciones ruidosas.
-  static Future<bool> testConnection() async {
-    try {
-      if (!isInitialized) {
-        final ok = await init();
-        if (!ok) return false;
-      }
-      if (_client == null) return false;
-      // Consulta ligera; si la tabla no existe aún, igual consideramos
-      // que el endpoint responde (credenciales válidas).
-      try {
-        await _client!.from('profiles').select('id').limit(1);
-        return true;
-      } catch (_) {
-        // Tabla puede no existir; si el cliente está vivo, OK
-        return _client != null;
-      }
-    } catch (_) {
-      return false;
-    }
+  /// true si hay sesión de cuenta activa
+  static bool get isLoggedIn => currentUser != null;
+
+  /// Cerrar sesión de la cuenta
+  static Future<void> signOut() async {
+    await _client?.auth.signOut();
   }
 }

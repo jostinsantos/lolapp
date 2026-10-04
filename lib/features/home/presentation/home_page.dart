@@ -10,6 +10,11 @@ import '../../player/presentation/player_page.dart';
 import '../../../data/datasources/remote/tmdb/tmdb_home_mobile_api.dart';
 import '../../content/presentation/content_options_modal.dart'; // ← modal de opciones
 import '../../addons/presentation/screens/addons_onboarding_page.dart';
+import '../../lolbot/presentation/lolbot_page.dart';
+import '../../foryou/presentation/for_you_section.dart';
+import '../../../data/addons/addon_manager.dart';
+import '../../../data/addons/stremio/stremio_addon_repository.dart';
+import '../../../data/addons/stremio/stremio_collection_repository.dart';
 
 const kAccentColor = Colors.purpleAccent;
 const kBgColor = Colors.black;
@@ -44,6 +49,8 @@ class _HomePageState extends State<HomePage>
   int _mainSliderIndex = 0;
 
   List<Map<String, dynamic>> _historial = [];
+  /// Filas de complementos (catalog) + colecciones Stremio/Nuvio
+  List<({String title, List<Map<String, dynamic>> items})> _stremioRows = [];
 
   int _recentTab = 0;
   int _topTab = 0;
@@ -120,9 +127,12 @@ class _HomePageState extends State<HomePage>
       _cachedHistorial = historial;
       _hasLoadedOnce = true;
 
+      final stremioRows = await _loadStremioRows();
+
       setState(() {
         _data = apiData;
         _historial = historial;
+        _stremioRows = stremioRows;
         _loading = false;
         _genreTab = 0;
       });
@@ -134,6 +144,64 @@ class _HomePageState extends State<HomePage>
         _loading = false;
       });
     }
+  }
+
+  Future<List<({String title, List<Map<String, dynamic>> items})>>
+      _loadStremioRows() async {
+    final out = <({String title, List<Map<String, dynamic>> items})>[];
+    try {
+      await AddonManager.instance.init();
+      final catalogSecs =
+          await StremioAddonRepository.instance.buildHomeSections(
+        maxPerSection: 18,
+        maxSections: 20,
+      );
+      for (final s in catalogSecs) {
+        if (s.items.isEmpty) continue;
+        out.add((
+          title: s.subtitle != null && s.subtitle!.isNotEmpty
+              ? '${s.title} · ${s.subtitle}'
+              : s.title,
+          items: s.items
+              .map((it) => {
+                    'id': it.extra['tmdbId'] ?? it.id,
+                    'title': it.title,
+                    'name': it.title,
+                    'poster_path': it.poster,
+                    'backdrop_path': it.backdrop,
+                    'overview': it.overview,
+                    'media_type':
+                        it.type.name == 'series' ? 'tv' : 'movie',
+                    'vote_average': it.rating,
+                  })
+              .toList(),
+        ));
+      }
+      final colSecs = await StremioCollectionRepository.instance
+          .buildHomeSectionsFromCollections(maxPerSection: 18);
+      for (final s in colSecs) {
+        if (s.items.isEmpty) continue;
+        out.add((
+          title: s.title,
+          items: s.items
+              .map((it) => {
+                    'id': it.extra['tmdbId'] ?? it.id,
+                    'title': it.title,
+                    'name': it.title,
+                    'poster_path': it.poster,
+                    'backdrop_path': it.backdrop,
+                    'overview': it.overview,
+                    'media_type':
+                        it.type.name == 'series' ? 'tv' : 'movie',
+                    'vote_average': it.rating,
+                  })
+              .toList(),
+        ));
+      }
+    } catch (e) {
+      debugPrint('[Home mobile] stremio rows: $e');
+    }
+    return out;
   }
 
   Future<Map<String, dynamic>?> _fetchHomeApi() async {
@@ -452,6 +520,10 @@ class _HomePageState extends State<HomePage>
                   ),
                 ),
               ),
+            // Sección Para ti (IA / Kino-style)
+            const SliverToBoxAdapter(
+              child: ForYouSection(isTv: false),
+            ),
             if (_historial.isNotEmpty) ...[
               const SliverToBoxAdapter(
                 child: _SectionHeader(
@@ -512,6 +584,21 @@ class _HomePageState extends State<HomePage>
                   ? _itemsOf('popular_movies')
                   : _itemsOf('popular_tv'),
             ),
+            // Complementos con catalog + colecciones (móvil)
+            ..._stremioRows.map((row) {
+              return SliverToBoxAdapter(
+                child: _TabbedSection(
+                  title: row.title,
+                  selectedTab: 0,
+                  onTabChanged: (_) {},
+                  tabs: const [],
+                  items: row.items,
+                  onTap: _openContent,
+                  onLongPress: _showOpcionesModal,
+                  showRating: true,
+                ),
+              );
+            }),
             if (_genreSliders.isNotEmpty) ..._buildGenreSection(),
             SliverToBoxAdapter(
               child: SizedBox(

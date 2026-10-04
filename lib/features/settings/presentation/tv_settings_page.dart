@@ -8,6 +8,7 @@ import 'sources/tv_sources_tab.dart';
 import 'appearance/tv_appearance_tab.dart';
 import 'cache/tv_cache_tab.dart';
 import 'player/tv_player_tab.dart';
+
 enum _ConfigTab {
   contenido,
   actualizaciones,
@@ -199,7 +200,7 @@ class ConfigPageState extends State<ConfigPage>
   Widget _buildTopTabs() {
     return Container(
       color: const Color(0xFF121214),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Row(
         children: List.generate(_tabLabels.length, (i) {
           final selected = _tab.index == i;
@@ -264,7 +265,7 @@ class ConfigPageState extends State<ConfigPage>
                       duration: const Duration(milliseconds: 150),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,
-                        vertical: 12,
+                        vertical: 10,
                       ),
                       decoration: BoxDecoration(
                         color: hasFocus
@@ -306,23 +307,23 @@ class ConfigPageState extends State<ConfigPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final topPad = _menuPosition == 'top' ? 56.0 : 8.0;
+    // El shell ya aplica el padding superior cuando el menú está en 'top'.
+    // Aquí NO debe haber SafeArea ni padding extra para evitar el hueco grande.
     return Scaffold(
       backgroundColor: kConfigBg,
-      body: Padding(
-        padding: EdgeInsets.only(top: topPad),
-        child: Column(
-          children: [
-            _buildTopTabs(),
-            Expanded(
-              child: SingleChildScrollView(
-                controller: _scroll,
-                padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-                child: _buildBody(),
-              ),
+      primary: false, // ← evita padding automático de status bar
+      resizeToAvoidBottomInset: false,
+      body: Column(
+        children: [
+          _buildTopTabs(),
+          Expanded(
+            child: SingleChildScrollView(
+              controller: _scroll,
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+              child: _buildBody(),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

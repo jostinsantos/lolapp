@@ -1,36 +1,36 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'presentation/mobile/mobile_shell.dart' as mobile;
 import 'presentation/tv/tv_shell.dart' as tv;
 import 'features/downloads/presentation/notification_helper.dart';
 import 'features/settings/presentation/updates/update_notification_service.dart';
-import 'core/constants/versiones.dart'; // ← versiones centralizadas
+import 'core/constants/versiones.dart';
 import 'supabase/supabase_config.dart';
 import 'supabase/supabase_client.dart';
+import 'supabase/supabase_auth.dart';
 import 'features/profile/presentation/profile_selection_page.dart';
+import 'features/profile/presentation/tv_profile_selection_page.dart';
+import 'features/foryou/presentation/taste_onboarding_page.dart';
+import 'features/foryou/presentation/taste_onboarding_page_tv.dart';
+import 'features/addons/presentation/screens/addons_onboarding_page.dart';
 import 'data/addons/addon_manager.dart';
-
-// Cast: botones de la notificación (play/pause/seek)
 import 'features/player/presentation/widgets/cast_manager.dart';
-// ⚠ Ajusta la ruta de import al sitio real de cast_manager.dart en tu proyecto.
-//    Ejemplos posibles:
-//    'features/player/presentation/widgets/cast_manager.dart'
-//    'features/player/cast/cast_manager.dart'
-//    'widgets/cast_manager.dart'
 
 const String kModeKey = 'app_mode'; // "mobile" | "tv"
 const String kDisclaimerKey = 'disclaimer_accepted';
+const String kTasteOnboardingKey = 'taste_onboarding_done_v1';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Supabase central
+  await AppSupabase.init();
 
   // Addons (fuentes + catálogos por Git)
   await AddonManager.instance.init();
@@ -38,19 +38,14 @@ void main() async {
   // Notificaciones (descargas + cast)
   await NotificationHelper.init();
 
-  // Aviso de nueva versión / parche (no bloquea el arranque)
-  // Respeta "recibir_parches" y solo notifica una vez por cada update.
+  // Aviso de nueva versión / parche
   unawaited(UpdateNotificationService.instance.checkAndNotify());
 
-  // Foreground Task → mantiene descargas Y cast vivos en segundo plano
-  // Un solo init: tanto DownloadManager como CastManager reutilizan este servicio
-  // y actualizan título/texto/botones con updateService cuando hace falta.
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'downloads_channel',
       channelName: 'Descargas y Cast',
-      channelDescription:
-          'Progreso de descargas y transmisión Cast a TV',
+      channelDescription: 'Progreso de descargas y transmisión Cast a TV',
       channelImportance: NotificationChannelImportance.LOW,
       priority: NotificationPriority.LOW,
       showWhen: false,
@@ -60,14 +55,13 @@ void main() async {
       playSound: false,
     ),
     foregroundTaskOptions: ForegroundTaskOptions(
-      eventAction: ForegroundTaskEventAction.repeat(5000), // cada 5 s
+      eventAction: ForegroundTaskEventAction.repeat(5000),
       autoRunOnBoot: false,
       allowWakeLock: true,
       allowWifiLock: true,
     ),
   );
 
-  // Escuchar botones de la notificación del Cast (vienen del isolate del servicio)
   FlutterForegroundTask.addTaskDataCallback((data) {
     if (data is Map && data['cast_btn'] is String) {
       CastManager().handleNotificationButton(data['cast_btn'] as String);
@@ -106,14 +100,10 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> {
   /// loading | mode | disclaimer
   String _screen = 'loading';
-
   String? _mode; // mobile | tv
 
-  // Foco modo
   final FocusNode _mobileFocus = FocusNode(debugLabel: 'mode_mobile');
   final FocusNode _tvFocus = FocusNode(debugLabel: 'mode_tv');
-
-  // Foco disclaimer
   final FocusNode _acceptFocus = FocusNode(debugLabel: 'disclaimer_accept');
   final FocusNode _rejectFocus = FocusNode(debugLabel: 'disclaimer_reject');
 
@@ -138,18 +128,19 @@ class _SplashScreenState extends State<SplashScreen> {
   // FLUJO:
   //  1) Modo (solo 1ª vez)
   //  2) Disclaimer (solo 1ª vez)
-  //  3) Home  (la actualización ahora se maneja dentro de MainHome)
+  //  3) Auth / Perfil (login-register o invitado + elegir perfil)
+  //  4) Algoritmo / Gustos (taste onboarding)
+  //  5) Addons onboarding
+  //  6) Home
   // ═══════════════════════════════════════════════════════════════════════════
 
   Future<void> _bootstrap() async {
-    // Mostrar el GIF de carga durante 3 segundos
-    await Future.delayed(const Duration(seconds: 3));
+    await Future.delayed(const Duration(seconds: 2));
 
     final prefs = await SharedPreferences.getInstance();
     final savedMode = prefs.getString(kModeKey);
 
     if (savedMode == null) {
-      // 1) Primera vez → elegir orientación
       if (!mounted) return;
       setState(() => _screen = 'mode');
       _focusAfterFrame(_mobileFocus);
@@ -158,10 +149,10 @@ class _SplashScreenState extends State<SplashScreen> {
 
     _mode = savedMode;
     await _applyOrientation(savedMode);
-    await _goDisclaimerOrHome();
+    await _goDisclaimerOrNext();
   }
 
-  Future<void> _goDisclaimerOrHome() async {
+  Future<void> _goDisclaimerOrNext() async {
     final prefs = await SharedPreferences.getInstance();
     final accepted = prefs.getBool(kDisclaimerKey) ?? false;
 
@@ -172,7 +163,7 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
-    await _goToHome();
+    await _goAuthAndOnboarding();
   }
 
   void _focusAfterFrame(FocusNode node) {
@@ -191,6 +182,8 @@ class _SplashScreenState extends State<SplashScreen> {
       await SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
       ]);
     }
   }
@@ -200,58 +193,136 @@ class _SplashScreenState extends State<SplashScreen> {
     await prefs.setString(kModeKey, mode);
     _mode = mode;
     await _applyOrientation(mode);
-
-    if (!mounted) return;
-    setState(() => _screen = 'loading');
-    await _goDisclaimerOrHome();
+    await _goDisclaimerOrNext();
   }
 
-  Future<void> _acceptDisclaimer() async {
+  Future<void> _onDisclaimerAccepted() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(kDisclaimerKey, true);
-    await _goToHome();
+    await _goAuthAndOnboarding();
   }
 
-  void _rejectDisclaimer() {
-    SystemNavigator.pop();
+  Future<void> _onDisclaimerRejected() async {
+    if (Platform.isAndroid) {
+      SystemNavigator.pop();
+    }
   }
 
-  Future<void> _goToHome() async {
+  /// Flujo completo:
+  /// 1) Welcome / Auth / Perfiles (ProfileSelection o TV)
+  /// 2) Si 1ª vez → Taste onboarding → Addons onboarding
+  /// 3) Home
+  ///
+  /// - Usuario registrado 1ª vez: welcome → auth → perfiles → taste → addons → home
+  /// - Usuario registrado no 1ª vez: (perfiles si hace falta) → home
+  /// - Invitado 1ª vez: welcome → taste → addons → home
+  /// - Invitado no 1ª vez: home
+  Future<void> _goAuthAndOnboarding() async {
     if (!mounted) return;
 
-    // Solo si Supabase está configurado (URL+KEY guardados) y aún no hay perfil:
-    // mostrar selección de perfiles. Si está desactivado → main normal (cache).
-    final hasCreds = await SupabaseConfig.hasCredentials();
-    final loggedIn = await SupabaseConfig.isLoggedIn();
-    final askEvery = await SupabaseConfig.getAskProfileEveryLaunch();
+    await AppSupabase.init();
 
-    // Pedir perfil si: (hay creds y no hay sesión) O (activo y "pedir cada vez")
-    final needProfile = hasCreds && (!loggedIn || askEvery);
+    // ¿Hay perfil seleccionado o modo invitado?
+    // Si está logueado pero sin perfil elegido → mostrar selector de perfiles.
+    var profileId = await SupabaseConfig.getCurrentProfileId();
+    var isGuest = await SupabaseConfig.isGuest();
+    final hasActiveProfile = profileId != null || isGuest;
 
-    if (needProfile) {
-      final ok = await AppSupabase.init();
+    if (!hasActiveProfile) {
       if (!mounted) return;
-      // Si no se pudo inicializar, no bloquear: ir al home normal
-      if (ok) {
-        // ProfileSelectionPage navega sola al home (pushAndRemoveUntil)
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (_, __, ___) => const ProfileSelectionPage(),
-            transitionDuration: const Duration(milliseconds: 350),
-            transitionsBuilder: (_, animation, __, child) {
-              return FadeTransition(opacity: animation, child: child);
-            },
-          ),
-        );
+      final isTv = _mode == 'tv';
+      await Navigator.of(context).push(
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) => isTv
+              ? const TvProfileSelectionPage(allowDismiss: false)
+              : const ProfileSelectionPage(allowDismiss: false),
+          transitionDuration: const Duration(milliseconds: 350),
+          transitionsBuilder: (_, animation, __, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
+
+      profileId = await SupabaseConfig.getCurrentProfileId();
+      isGuest = await SupabaseConfig.isGuest();
+      if (profileId == null && !isGuest) {
+        // Sin elegir nada → volver a pedir
+        if (mounted) await _goAuthAndOnboarding();
         return;
       }
     }
 
+    // Onboarding de gustos + addons solo la primera vez
+    await _runFirstTimeOnboardingIfNeeded();
+  }
+
+  Future<void> _runFirstTimeOnboardingIfNeeded() async {
+    if (!mounted) return;
+    final prefs = await SharedPreferences.getInstance();
+    final tasteDone = prefs.getBool(kTasteOnboardingKey) ?? false;
+    final addonsDone = !(await AddonsOnboardingPage.shouldShow());
+
+    final isFirstTime = !tasteDone || !addonsDone;
+    if (!isFirstTime) {
+      await _openHome();
+      return;
+    }
+
+    final isTv = _mode == 'tv';
+
+    // 1) Taste onboarding (contenido favorito)
+    if (!tasteDone) {
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) {
+            if (isTv) {
+              return TasteOnboardingPageTv(
+                onFinished: () {
+                  Navigator.of(context).pop();
+                },
+              );
+            }
+            return TasteOnboardingPage(
+              onFinished: () {
+                Navigator.of(context).pop();
+              },
+            );
+          },
+          transitionDuration: const Duration(milliseconds: 350),
+          transitionsBuilder: (_, animation, __, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
+      await prefs.setBool(kTasteOnboardingKey, true);
+    }
+
+    // 2) Addons onboarding
+    if (await AddonsOnboardingPage.shouldShow()) {
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) => const AddonsOnboardingPage(),
+          transitionDuration: const Duration(milliseconds: 350),
+          transitionsBuilder: (_, animation, __, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
+      // markDone se llama dentro de la página al terminar/saltar
+    }
+
+    await _openHome();
+  }
+
+  Future<void> _openHome() async {
+    if (!mounted) return;
     final mode = _mode ?? 'mobile';
     final Widget home =
         mode == 'tv' ? const tv.MainHome() : const mobile.MainHome();
 
-    Navigator.of(context).pushReplacement(
+    Navigator.of(context).pushAndRemoveUntil(
       PageRouteBuilder(
         pageBuilder: (_, __, ___) => home,
         transitionDuration: const Duration(milliseconds: 350),
@@ -259,6 +330,7 @@ class _SplashScreenState extends State<SplashScreen> {
           return FadeTransition(opacity: animation, child: child);
         },
       ),
+      (_) => false,
     );
   }
 
@@ -330,7 +402,7 @@ class _SplashScreenState extends State<SplashScreen> {
                   focusNode: _tvFocus,
                   icon: Icons.tv_rounded,
                   title: 'TV / Android TV',
-                  subtitle: 'Orientación horizontal',
+                  subtitle: 'Orientación horizontal + mando',
                   onTap: () => _onModeChosen('tv'),
                   onArrowUp: () => _mobileFocus.requestFocus(),
                 ),
@@ -348,54 +420,59 @@ class _SplashScreenState extends State<SplashScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 28),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  'lolplustv conecta con servicios de terceros para poder '
-                  'funcionar; no aloja contenido propio. Es un servicio que '
-                  'dispone fuentes de servidores online gratuitos en internet '
-                  'para facilitar el acceso a los usuarios. No apoyamos la '
-                  'piratería: te invitamos siempre a ver películas y series '
-                  'por canales legales. La app no contiene anuncios por estos '
-                  'motivos. Al activar, entiendes que decides usar estos '
-                  'servicios bajo tu propia responsabilidad, y que la app '
-                  'no responde por su uso.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.85),
-                    fontSize: _isTv ? 18 : 15,
-                    height: 1.5,
-                  ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+          child: Column(
+            children: [
+              const Spacer(),
+              const Icon(Icons.info_outline, color: Color(0xFFE50914), size: 56),
+              const SizedBox(height: 20),
+              const Text(
+                'Aviso legal',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
                 ),
-                const SizedBox(height: 36),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _FocusButton(
-                      focusNode: _acceptFocus,
-                      label: 'Activar',
-                      filled: true,
-                      onTap: _acceptDisclaimer,
-                      onArrowRight: () => _rejectFocus.requestFocus(),
-                      onArrowLeft: () => _rejectFocus.requestFocus(),
-                    ),
-                    const SizedBox(width: 14),
-                    _FocusButton(
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Esta aplicación no aloja ni distribuye contenido. '
+                'Solo proporciona enlaces a fuentes de terceros. '
+                'El uso es responsabilidad del usuario.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.7),
+                  fontSize: 15,
+                  height: 1.45,
+                ),
+              ),
+              const Spacer(),
+              Row(
+                children: [
+                  Expanded(
+                    child: _FocusButton(
                       focusNode: _rejectFocus,
-                      label: 'Cerrar',
+                      label: 'Rechazar',
                       filled: false,
-                      onTap: _rejectDisclaimer,
-                      onArrowLeft: () => _acceptFocus.requestFocus(),
+                      onTap: _onDisclaimerRejected,
                       onArrowRight: () => _acceptFocus.requestFocus(),
                     ),
-                  ],
-                ),
-              ],
-            ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: _FocusButton(
+                      focusNode: _acceptFocus,
+                      label: 'Aceptar',
+                      filled: true,
+                      onTap: _onDisclaimerAccepted,
+                      onArrowLeft: () => _rejectFocus.requestFocus(),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
           ),
         ),
       ),
@@ -566,56 +643,31 @@ class _FocusButton extends StatelessWidget {
       child: Builder(
         builder: (context) {
           final hasFocus = Focus.of(context).hasFocus;
-          final borderColor = hasFocus
-              ? Colors.white
-              : (filled ? Colors.transparent : const Color(0xFFE50914));
-
-          if (filled) {
-            return SizedBox(
-              height: 48,
-              child: ElevatedButton(
-                onPressed: onTap,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFE50914),
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28),
-                    side: BorderSide(color: borderColor, width: 2),
-                  ),
-                ),
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            );
-          }
-
           return SizedBox(
-            height: 48,
-            child: OutlinedButton(
+            height: 52,
+            child: ElevatedButton(
               onPressed: onTap,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFE50914),
-                side: BorderSide(
-                  color: borderColor,
-                  width: hasFocus ? 2.5 : 1.2,
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 28),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: filled
+                    ? (hasFocus ? const Color(0xFFFF1A2A) : const Color(0xFFE50914))
+                    : (hasFocus ? const Color(0xFF2A2A2E) : const Color(0xFF1C1C1E)),
+                foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(28),
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(
+                    color: hasFocus
+                        ? const Color(0xFFE50914)
+                        : Colors.white.withOpacity(0.12),
+                    width: hasFocus ? 2 : 1,
+                  ),
                 ),
+                elevation: 0,
               ),
               child: Text(
                 label,
                 style: const TextStyle(
                   fontSize: 16,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),

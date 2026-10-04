@@ -15,6 +15,7 @@ import '../../downloads/presentation/extractor_download_page.dart';
 import '../../../supabase/guardados_service.dart';
 import 'widgets/tmdb_upcoming_service.dart';
 import 'widgets/upcoming_episodes_modal.dart';
+import '../../foryou/presentation/like_button.dart';
 
 // ── Design tokens ──────────────────────────────────────────────────────────
 const kBg = Color(0xFF000000);
@@ -1405,7 +1406,7 @@ class _PageContenidoState extends State<PageContenido>
                       ],
                     ),
 
-                  // Movie: grid de 4 acciones
+                  // Movie: grid de acciones + Me gusta (IA)
                   if (isMovie) ...[
                     const SizedBox(height: 14),
                     Row(
@@ -1418,6 +1419,17 @@ class _PageContenidoState extends State<PageContenido>
                             label: 'Watchlist',
                             active: _isSaved,
                             onTap: _toggleSaved,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: LikeContentButton(
+                            tmdbId: _resolvedTmdbId,
+                            title: (_data?['title'] ?? _data?['name'] ?? '').toString(),
+                            mediaType: _resolvedMediaType,
+                            genres: ((_data?['genres'] as List?) ?? [])
+                                .map((g) => (g is Map ? g['name'] : g).toString())
+                                .toList(),
                           ),
                         ),
                         const SizedBox(width: 8),

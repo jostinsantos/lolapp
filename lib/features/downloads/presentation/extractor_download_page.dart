@@ -916,11 +916,17 @@ class _ExtractorDownloadPageState extends State<ExtractorDownloadPage>
       _stopDetectionJs();
       _unlockOrientation();
 
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const DescargasPage()),
-        (route) =>
-            route.isFirst, // o el criterio que uses para no romper el stack
-      );
+      // Descarga en background: volver al contenido de origen
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Descarga iniciada · puedes seguir navegando'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 3),
+          ),
+        );
+        Navigator.of(context).pop();
+      }
     } catch (e) {
       if (mounted) {
         setState(() {

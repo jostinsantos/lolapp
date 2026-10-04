@@ -47,6 +47,24 @@ class _NuvioPackagesPageState extends State<NuvioPackagesPage> {
       _progress = 'Descargando manifest…';
     });
     try {
+      // 1) Intentar protocolo Stremio/Nuvio de CATÁLOGO (manifest + catalogs[])
+      try {
+        final stremio = await AddonManager.instance.addStremioCatalog(url);
+        final n = stremio.manifest?.catalogs.length ?? 0;
+        if (n > 0 || (stremio.manifest?.hasCatalog ?? false)) {
+          setState(() {
+            _preview = null;
+            _msg =
+                'Catálogo Stremio/Nuvio «${stremio.displayName}»: $n catálogos instalados. Aparecerán en Inicio.';
+            _progress = null;
+          });
+          return;
+        }
+      } catch (_) {
+        // No es (solo) catálogo Stremio → seguir con paquete fuentes Nuvio
+      }
+
+      // 2) Paquete de fuentes Nuvio (scrapers JS) — sistema original
       final pkg = await AddonManager.instance.addNuvioPackage(url);
       setState(() {
         _preview = pkg;
@@ -299,16 +317,213 @@ class _NuvioPackagesPageState extends State<NuvioPackagesPage> {
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 24),
               child: Text(
-                'Ningún paquete Nuvio cargado aún.',
+                'Ningún paquete de fuentes Nuvio cargado aún.',
                 style: TextStyle(color: Colors.white54),
                 textAlign: TextAlign.center,
               ),
             )
           else
             ...packages.map(_buildPackageCard),
+
+          // ── Catálogos Stremio / Nuvio (protocolo) ──
+          const SizedBox(height: 28),
+          const Text(
+            'Catálogos Stremio / Nuvio',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Addons con manifest.json + catalogs[] (misma API que Nuvio/Stremio). '
+            'No afectan a tus fuentes JS.',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          if (AddonManager.instance.stremioCatalogAddons.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Text(
+                'Ningún catálogo Stremio instalado. Pega una URL …/manifest.json arriba.',
+                style: TextStyle(color: Colors.white54),
+              ),
+            )
+          else
+            ...AddonManager.instance.stremioCatalogAddons.map((a) {
+              final n = a.manifest?.catalogs.length ?? 0;
+              final hasStream = a.manifest?.resources
+                      .any((r) => r.name.toLowerCase() == 'stream') ??
+                  false;
+              return Card(
+                color: const Color(0xFF1C1C1E),
+                margin: const EdgeInsets.only(bottom: 10),
+                child: ListTile(
+                  title: Text(
+                    a.displayName,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  subtitle: Text(
+                    a.errorMessage ??
+                        '$n catálogos${hasStream ? " · streams" : ""} · ${a.enabled ? "activo" : "off"}\n${a.manifestUrl}',
+                    style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  ),
+                  isThreeLine: true,
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Switch(
+                        value: a.enabled,
+                        activeColor: const Color(0xFFE50914),
+                        onChanged: (v) async {
+                          await AddonManager.instance
+                              .setStremioCatalogEnabled(a.manifestUrl, v);
+                          if (mounted) setState(() {});
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline,
+                            color: Colors.white54),
+                        onPressed: () async {
+                          await AddonManager.instance
+                              .removeStremioCatalog(a.manifestUrl);
+                          if (mounted) setState(() {});
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+
+          // ── Colecciones (estilo Nuvio) ──
+          const SizedBox(height: 28),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Colecciones',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _importCollectionsJson,
+                icon: const Icon(Icons.file_upload_outlined,
+                    color: Color(0xFFE50914), size: 18),
+                label: const Text('Importar JSON',
+                    style: TextStyle(color: Color(0xFFE50914))),
+              ),
+            ],
+          ),
+          const Text(
+            'Importa colecciones JSON (estilo Nuvio). Se resuelven con los catálogos instalados y se muestran en Inicio.',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          if (AddonManager.instance.stremioCollections.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Ninguna colección importada.',
+                style: TextStyle(color: Colors.white54),
+              ),
+            )
+          else
+            ...AddonManager.instance.stremioCollections.map((c) {
+              return Card(
+                color: const Color(0xFF1C1C1E),
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  title: Text(c.title,
+                      style: const TextStyle(color: Colors.white)),
+                  subtitle: Text(
+                    '${c.sources.length} fuentes · home: ${c.showOnHome ? "sí" : "no"}',
+                    style:
+                        const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline,
+                        color: Colors.white54),
+                    onPressed: () async {
+                      await AddonManager.instance
+                          .removeStremioCollection(c.id);
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                ),
+              );
+            }),
         ],
       ),
     );
+  }
+
+  Future<void> _importCollectionsJson() async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1F),
+        title: const Text('Importar colecciones',
+            style: TextStyle(color: Colors.white)),
+        content: SizedBox(
+          width: 400,
+          child: TextField(
+            controller: ctrl,
+            maxLines: 12,
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+            decoration: InputDecoration(
+              hintText:
+                  '[{ "id":"…", "title":"…", "sources":[{ "provider":"addon", "type":"movie", "catalogId":"…" }] }]',
+              hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+              filled: true,
+              fillColor: const Color(0xFF1C1C1E),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Importar',
+                style: TextStyle(color: Color(0xFFE50914))),
+          ),
+        ],
+      ),
+    );
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (ok != true || !mounted) {
+      ctrl.dispose();
+      return;
+    }
+    final raw = ctrl.text.trim();
+    ctrl.dispose();
+    if (raw.isEmpty) return;
+    try {
+      final n = await AddonManager.instance.importStremioCollectionsJson(raw);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Importadas: $n colecciones')),
+      );
+      setState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al importar: $e')),
+      );
+    }
   }
 
   Widget _buildPackageCard(SourcePackage pkg) {

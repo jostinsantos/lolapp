@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../data/addons/addon_manager.dart';
 import '../../../../data/addons/models/addon.dart';
 import 'nuvio_packages_page.dart';
+import 'nuvio_extensions_hub_page.dart';
 import '../../../../data/addons/services/community_service.dart';
 import 'tv_addons_actuales_page.dart';
 import 'tv_addons_comunidad_page.dart';
@@ -102,12 +103,13 @@ class _AddonsHubPageState extends State<AddonsHubPage> {
                 _tile(
                   context,
                   icon: Icons.inventory_2_rounded,
-                  title: 'Addons Nuvio',
+                  title: 'Extensiones Nuvio',
                   subtitle:
-                      'Pegar URL de manifest e instalar fuentes una a una o todas.',
+                      'Corriente · Complementos · Plugins · Colecciones (separados).',
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => const TvNuvioPackagesPage(),
+                      builder: (_) =>
+                          const NuvioExtensionsHubPage(isTv: true),
                     ),
                   ),
                   isTv: true,
@@ -164,12 +166,13 @@ class _AddonsHubPageState extends State<AddonsHubPage> {
           _tile(
             context,
             icon: Icons.inventory_2_rounded,
-            title: 'Addons Nuvio',
+            title: 'Extensiones Nuvio',
             subtitle:
-                'Pegar URL de manifest e instalar fuentes una a una o todas.',
+                'Corriente · Complementos · Plugins · Colecciones (separados).',
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => const NuvioPackagesPage(isTv: false),
+                builder: (_) =>
+                    const NuvioExtensionsHubPage(isTv: false),
               ),
             ),
           ),

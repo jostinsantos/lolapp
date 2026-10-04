@@ -84,6 +84,7 @@ class VidSrcService {
       'servidor_nombre': name,
       'server': 'VidSrc',
       'idioma': 'en_US',
+      'lang': 'en_US',
       'language': 'en_US',
       'type': 'embed',
       'headers': {

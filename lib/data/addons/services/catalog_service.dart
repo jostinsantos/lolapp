@@ -3,12 +3,16 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/addon.dart';
 import '../models/content.dart';
+import '../stremio/stremio_addon_repository.dart';
+import '../stremio/stremio_collection_repository.dart';
 import 'catalog_js_bridge.dart';
 
 /// La app NO llama a TMDB directamente.
 /// Cada catálogo (repo Git) aporta datos vía:
 /// 1) JS del addon (getHome / search / discover / getMeta)
 /// 2) o json_api / static_json en extra
+/// 3) Addons Stremio/Nuvio de catálogo (manifest.json + /catalog/{type}/{id}.json)
+///    vía [StremioAddonRepository] — sistema paralelo, no sustituye (1)/(2).
 class CatalogService {
   final _js = CatalogJsBridge.instance;
 
@@ -40,12 +44,42 @@ class CatalogService {
 
   Future<List<CatalogRow>> getHomeRows(List<AddonManifest> catalogs) async {
     final rows = <CatalogRow>[];
+    // 1) Catálogos propios (JS / json_api)
     for (final a in catalogs.where((c) => c.enabled && c.isCatalog)) {
       try {
         rows.addAll(await _homeFor(a));
       } catch (e) {
         debugPrint('[Catalog] home ${a.id}: $e');
       }
+    }
+    // 2) Catálogos Stremio / Nuvio (protocolo manifest + /catalog/...)
+    try {
+      final stremio = await StremioAddonRepository.instance.buildHomeSections();
+      for (final s in stremio) {
+        rows.add(CatalogRow(
+          id: 'stremio:${s.target.key}',
+          title: s.subtitle != null && s.subtitle!.isNotEmpty
+              ? '${s.title} · ${s.subtitle}'
+              : s.title,
+          items: s.items,
+        ));
+      }
+    } catch (e) {
+      debugPrint('[Catalog] stremio home: $e');
+    }
+    // 3) Colecciones (estilo Nuvio) guardadas / importadas
+    try {
+      final cols = await StremioCollectionRepository.instance
+          .buildHomeSectionsFromCollections();
+      for (final s in cols) {
+        rows.add(CatalogRow(
+          id: 'collection:${s.target.catalogId}',
+          title: s.title,
+          items: s.items,
+        ));
+      }
+    } catch (e) {
+      debugPrint('[Catalog] collections home: $e');
     }
     return rows;
   }

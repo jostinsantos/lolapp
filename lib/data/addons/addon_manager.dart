@@ -5,9 +5,14 @@ import 'services/source_service.dart';
 import 'services/catalog_service.dart';
 import 'services/storage_service.dart';
 import 'models/content.dart';
+import 'stremio/stremio_addon_repository.dart';
+import 'stremio/stremio_collection_repository.dart';
+import 'stremio/stream_badge_repository.dart';
+import 'stremio/stremio_models.dart';
 
 /// Gestor central de addons (fuentes + catálogos) estilo App2.
-/// Solo fuentes y catálogos por Git/URL. Sin extractores nativos.
+/// Fuentes y catálogos por Git/URL (JS) — sin cambios.
+/// Además: catálogos + streams + colecciones Stremio/Nuvio (paralelo).
 class AddonManager extends ChangeNotifier {
   AddonManager._();
   static final AddonManager instance = AddonManager._();
@@ -49,6 +54,10 @@ class AddonManager extends ChangeNotifier {
       final stored = await _storage.loadAddons();
       addons = stored;
       packages = await _storage.loadPackages();
+      // Catálogos / streams / colecciones Stremio/Nuvio — no mezcla con addons JS
+      await StremioAddonRepository.instance.init();
+      await StremioCollectionRepository.instance.init();
+      await StreamBadgeRepository.instance.init();
       _initialized = true;
       error = null;
     } catch (e, st) {
@@ -58,6 +67,49 @@ class AddonManager extends ChangeNotifier {
       loading = false;
       notifyListeners();
     }
+  }
+
+  // ── Stremio / Nuvio catalog addons (paralelo al sistema JS) ───────────
+
+  List<ManagedStremioAddon> get stremioCatalogAddons =>
+      StremioAddonRepository.instance.addons;
+
+  Future<ManagedStremioAddon> addStremioCatalog(String manifestUrl) async {
+    final m = await StremioAddonRepository.instance.addOrRefresh(manifestUrl);
+    notifyListeners();
+    return m;
+  }
+
+  Future<void> removeStremioCatalog(String manifestUrl) async {
+    await StremioAddonRepository.instance.remove(manifestUrl);
+    notifyListeners();
+  }
+
+  Future<void> setStremioCatalogEnabled(String manifestUrl, bool enabled) async {
+    await StremioAddonRepository.instance.setEnabled(manifestUrl, enabled);
+    notifyListeners();
+  }
+
+  List<StremioCollection> get stremioCollections =>
+      StremioCollectionRepository.instance.collections;
+
+  Future<int> importStremioCollectionsJson(String raw) async {
+    final n = await StremioCollectionRepository.instance.importJson(raw);
+    notifyListeners();
+    return n;
+  }
+
+  Future<void> removeStremioCollection(String id) async {
+    await StremioCollectionRepository.instance.remove(id);
+    notifyListeners();
+  }
+
+  Future<StremioCollection> createCollectionFromCatalog(
+      CatalogTarget target) async {
+    final c =
+        await StremioCollectionRepository.instance.createFromCatalog(target);
+    notifyListeners();
+    return c;
   }
 
   Future<void> reload() async {

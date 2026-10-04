@@ -14,6 +14,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../features/home/presentation/home_page.dart';
 import '../../features/tvchanel/home/home_tvchanel.dart';
+import '../../features/lolbot/presentation/lolbot_page.dart';
+import '../../features/foryou/presentation/taste_onboarding_page.dart';
+import '../../data/ai/daily_ai_gate.dart';
 import '../../core/services/session_watch_timer.dart';
 import '../../features/player/presentation/widgets/mini_player_service.dart';
 import '../../features/search/presentation/search_page.dart';
@@ -26,6 +29,7 @@ import '../../features/tvchanel/models/tv_channel_models.dart';
 import '../shared/modals/playback_setup_modal.dart';
 import '../../core/constants/versiones.dart';
 import '../../core/utils/display_refresh.dart';
+import '../../supabase/supabase_config.dart';
 
 const _kAccentColor = Color(0xFFE50914);
 
@@ -60,6 +64,8 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
 
   int _currentIndex = _kHome;
   bool _tvLiveMode = false; // Home VOD vs TV en Vivo
+  String? _profileAvatar;
+  String? _profileName;
 
   final GlobalKey _homeKey = GlobalKey();
   final GlobalKey _bibliotecaKey = GlobalKey();
@@ -103,10 +109,43 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
     MiniPlayerService.instance.loadPref();
     _loadContinueItem();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadProfileSession();
       _bootstrapOfflineOrSetup();
       _checkForUpdate();
       SessionWatchTimer.instance.start(context);
+      // Gustos: no bloquear el home (evita pantalla negra)
+      // El usuario puede configurarlos desde For You más adelante.
     });
+  }
+
+  Future<void> _loadProfileSession() async {
+    try {
+      final avatar = await SupabaseConfig.getCurrentProfileAvatar();
+      final name = await SupabaseConfig.getCurrentProfileName();
+      try {
+        await TasteOnboardingGate.markDone();
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() {
+        _profileAvatar = avatar;
+        _profileName = name;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _maybeShowTasteOnboarding() async {
+    final done = await TasteOnboardingGate.isDone();
+    if (done || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => TasteOnboardingPage(
+          onFinished: () {
+            Navigator.of(context).pop();
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -1262,8 +1301,9 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
                                 selected: _currentIndex == _kServicios,
                                 onTap: () => _selectTab(_kServicios),
                               ),
-                              _NavIcon(
-                                icon: Icons.settings_rounded,
+                              _ProfileNavIcon(
+                                avatarUrl: _profileAvatar,
+                                name: _profileName,
                                 selected: _currentIndex == _kConfig,
                                 onTap: () => _selectTab(_kConfig),
                               ),
@@ -1329,7 +1369,9 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
                     ),
 
 
-                    // AppBar transparente solo en Home: botón TV Live / VOD
+                    // AppBar transparente solo en Home:
+                    // - Izquierda: Lolbot (chat IA) — solo en modo VOD
+                    // - Derecha: TV Live / VOD
                     if (_currentIndex == _kHome)
                       Positioned(
                         top: 0,
@@ -1339,39 +1381,79 @@ class _MainHomeState extends State<MainHome> with WidgetsBindingObserver {
                           bottom: false,
                           child: SizedBox(
                             height: 52,
-                            child: Align(
-                              alignment: Alignment.centerRight,
-                              child: Padding(
-                                padding: const EdgeInsets.only(right: 12),
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() => _tvLiveMode = !_tvLiveMode);
-                                  },
-                                  child: Container(
-                                    width: 44,
-                                    height: 44,
-                                    decoration: const BoxDecoration(
-                                      shape: BoxShape.circle,
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              child: Row(
+                                children: [
+                                  // Lolbot — extremo izquierdo (opuesto al TV)
+                                  if (!_tvLiveMode)
+                                    GestureDetector(
+                                      onTap: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => const LolbotPage(),
+                                          ),
+                                        );
+                                      },
+                                      child: Container(
+                                        width: 44,
+                                        height: 44,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: Colors.black.withOpacity(0.55),
+                                          border: Border.all(
+                                            color: Colors.purpleAccent
+                                                .withOpacity(0.7),
+                                            width: 1.5,
+                                          ),
+                                        ),
+                                        alignment: Alignment.center,
+                                        // Solo la letra L (ya no "LOL BOT" ni emoji)
+                                        child: const Text(
+                                          'L',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 20,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
                                     ),
-                                    clipBehavior: Clip.antiAlias,
-                                    child: Image.asset(
-                                      _tvLiveMode
-                                          ? 'assets/images/vod.png'
-                                          : 'assets/images/tvlive.png',
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => Container(
-                                        color: const Color(0xFFE50914),
-                                        child: Icon(
-                                          _tvLiveMode
-                                              ? Icons.movie_rounded
-                                              : Icons.live_tv_rounded,
-                                          color: Colors.white,
-                                          size: 22,
+                                  const Spacer(),
+                                  // TV Live / VOD — extremo derecho
+                                  GestureDetector(
+                                    onTap: () {
+                                      setState(
+                                          () => _tvLiveMode = !_tvLiveMode);
+                                    },
+                                    child: Container(
+                                      width: 44,
+                                      height: 44,
+                                      decoration: const BoxDecoration(
+                                        shape: BoxShape.circle,
+                                      ),
+                                      clipBehavior: Clip.antiAlias,
+                                      child: Image.asset(
+                                        _tvLiveMode
+                                            ? 'assets/images/vod.png'
+                                            : 'assets/images/tvlive.png',
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) =>
+                                            Container(
+                                          color: const Color(0xFFE50914),
+                                          child: Icon(
+                                            _tvLiveMode
+                                                ? Icons.movie_rounded
+                                                : Icons.live_tv_rounded,
+                                            color: Colors.white,
+                                            size: 22,
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
+                                ],
                               ),
                             ),
                           ),
@@ -1877,6 +1959,65 @@ class _MiniPlayerBarCompact extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Avatar del perfil en el menú inferior (reemplaza el icono de config).
+class _ProfileNavIcon extends StatelessWidget {
+  final String? avatarUrl;
+  final String? name;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ProfileNavIcon({
+    required this.avatarUrl,
+    required this.name,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasAvatar = avatarUrl != null && avatarUrl!.trim().isNotEmpty;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 48,
+        height: 48,
+        child: Center(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: selected ? 36 : 32,
+            height: selected ? 36 : 32,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: selected ? const Color(0xFFE50914) : Colors.white24,
+                width: selected ? 2.2 : 1,
+              ),
+              color: Colors.white12,
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: hasAvatar
+                ? Image.network(
+                    avatarUrl!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Icon(
+                      Icons.person_rounded,
+                      size: selected ? 20 : 18,
+                      color: selected ? Colors.white : Colors.white54,
+                    ),
+                  )
+                : Icon(
+                    Icons.person_rounded,
+                    size: selected ? 20 : 18,
+                    color: selected ? Colors.white : Colors.white54,
+                  ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -24,6 +24,7 @@ class UnlimplayServer {
       'servidor_url': url,
       'calidad': 'HD',
       'idioma': idiomaCode,
+      'lang': idiomaCode,
       'estado': 'activo',
       'es_unlimplay': true,
     };

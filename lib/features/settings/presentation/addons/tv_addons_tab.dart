@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../addons/presentation/screens/tv_addons_actuales_page.dart';
 import '../../../addons/presentation/screens/tv_addons_comunidad_page.dart';
-import '../../../addons/presentation/screens/tv_nuvio_packages_page.dart';
+import '../../../addons/presentation/screens/nuvio_extensions_hub_page.dart';
 
-/// Pestaña TV: acceso a Addons actuales, Comunidad y Nuvio (páginas 100% TV).
+/// Pestaña TV: Addons actuales, Comunidad y Extensiones Nuvio (4 tipos).
 class TvAddonsTab extends StatefulWidget {
   final VoidCallback? onRequestTabFocus;
 
@@ -85,9 +85,11 @@ class TvAddonsTabState extends State<TvAddonsTab> {
           _card(
             node: _n3,
             icon: Icons.inventory_2_rounded,
-            title: 'Addons Nuvio',
-            subtitle: 'Manifest URL: cargar scrapers e instalar uno a uno o todos',
-            onTap: () => _open(const TvNuvioPackagesPage()),
+            title: 'Extensiones Nuvio',
+            subtitle:
+                'Corriente · Complementos · Plugins · Colecciones',
+            onTap: () =>
+                _open(const NuvioExtensionsHubPage(isTv: true)),
             onUp: () => _n2.requestFocus(),
             onDown: null,
           ),

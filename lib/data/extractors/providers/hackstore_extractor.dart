@@ -325,6 +325,7 @@ class HackStoreService {
         'server': serverName,
         'server_id': serverId,
         'idioma': idioma,
+      'lang': idioma,
         'language': idioma,
         'type': player['type']?.toString() ?? 'embed',
         'url': rawUrl,

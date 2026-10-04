@@ -485,6 +485,7 @@ class SmartPelisServer {
       'servidor_url': url,
       'calidad': 'HD',
       'idioma': SmartPelisService._languageToCode(language),
+      'lang': SmartPelisService._languageToCode(language),
       'estado': 'activo',
       'es_smartpelis': true,
       'tmdb_id': tmdbId,

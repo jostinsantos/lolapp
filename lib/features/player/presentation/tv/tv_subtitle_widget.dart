@@ -5,21 +5,37 @@ class SubtitlePrefs {
   static const sizeKey = 'subtitulo_tamano';
   static const boldKey = 'subtitulos_negrita';
   static const offsetKey = 'player_vertical_offset';
+  static const bgKey = 'subtitulo_fondo';
+  static const outlineKey = 'subtitulo_contorno';
+  static const colorKey = 'subtitulo_color';
+  static const strokeColorKey = 'subtitulo_contorno_color';
 
   final double fontSize;
   final FontWeight fontWeight;
   final double verticalOffset;
+  final bool showBackground;
+  final bool showOutline;
+  final Color textColor;
+  final Color strokeColor;
 
   const SubtitlePrefs({
     required this.fontSize,
     required this.fontWeight,
     required this.verticalOffset,
+    this.showBackground = false,
+    this.showOutline = true,
+    this.textColor = Colors.white,
+    this.strokeColor = Colors.black,
   });
 
   static const defaults = SubtitlePrefs(
     fontSize: 22,
     fontWeight: FontWeight.w600,
     verticalOffset: 0,
+    showBackground: false,
+    showOutline: true,
+    textColor: Colors.white,
+    strokeColor: Colors.black,
   );
 
   static double sizeFromCode(String? code) {
@@ -34,6 +50,17 @@ class SubtitlePrefs {
     }
   }
 
+  static Color _colorFromHex(String? hex, Color fallback) {
+    if (hex == null || hex.isEmpty) return fallback;
+    try {
+      var h = hex.replaceFirst('#', '');
+      if (h.length == 6) h = 'FF$h';
+      return Color(int.parse(h, radix: 16));
+    } catch (_) {
+      return fallback;
+    }
+  }
+
   static Future<SubtitlePrefs> load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -41,10 +68,20 @@ class SubtitlePrefs {
       final bold = prefs.getBool(boldKey) ?? false;
       final offset =
           (prefs.getDouble(offsetKey) ?? 0).clamp(-80.0, 80.0);
+      final showBg = prefs.getBool(bgKey) ?? false;
+      final showOutline = prefs.getBool(outlineKey) ?? true;
+      final textColor =
+          _colorFromHex(prefs.getString(colorKey), Colors.white);
+      final strokeColor =
+          _colorFromHex(prefs.getString(strokeColorKey), Colors.black);
       return SubtitlePrefs(
         fontSize: size,
         fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
         verticalOffset: offset,
+        showBackground: showBg,
+        showOutline: showOutline,
+        textColor: textColor,
+        strokeColor: strokeColor,
       );
     } catch (_) {
       return defaults;
@@ -99,8 +136,8 @@ class SubtitleWidget extends StatelessWidget {
     required SubtitlePrefs prefs,
     double baseBottomPadding = 40.0,
     double maxWidth = 780,
-    Color textColor = Colors.white,
-    Color strokeColor = Colors.black,
+    Color? textColor,
+    Color? strokeColor,
     double strokeWidth = 2.5,
   }) {
     return SubtitleWidget(
@@ -111,9 +148,10 @@ class SubtitleWidget extends StatelessWidget {
       fontSize: prefs.fontSize,
       fontWeight: prefs.fontWeight,
       verticalOffset: prefs.verticalOffset,
-      textColor: textColor,
-      strokeColor: strokeColor,
-      strokeWidth: strokeWidth,
+      textColor: textColor ?? prefs.textColor,
+      strokeColor: strokeColor ?? prefs.strokeColor,
+      strokeWidth: prefs.showOutline ? strokeWidth : 0,
+      showBackground: prefs.showBackground,
       maxWidth: maxWidth,
     );
   }

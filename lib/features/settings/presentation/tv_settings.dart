@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'tvchanel/tv_chanel_tab.dart'; // ← ajusta la ruta
+import 'tvchanel/tv_chanel_tab.dart';
 import 'tv_config_shared.dart';
 import 'content/tv_content_tab.dart';
 import 'updates/tv_updates_tab.dart';
@@ -17,7 +17,7 @@ enum _ConfigTab {
   actualizaciones,
   fuentes,
   addons,
-  tvchanel, // ← NUEVO
+  tvchanel,
   apariencia,
   cache,
   player,
@@ -42,7 +42,6 @@ class ConfigPageState extends State<ConfigPage>
     with AutomaticKeepAliveClientMixin {
   _ConfigTab _tab = _ConfigTab.contenido;
   bool _movingFocusToContent = false;
-  String _menuPosition = 'top';
 
   late final List<FocusNode> _tabNodes;
   final ScrollController _scroll = ScrollController();
@@ -62,7 +61,7 @@ class ConfigPageState extends State<ConfigPage>
     'Actualizaciones',
     'Fuentes',
     'Addons',
-    'TV / Canales', // ← NUEVO
+    'TV / Canales',
     'Apariencia',
     'Caché',
     'Player',
@@ -79,9 +78,6 @@ class ConfigPageState extends State<ConfigPage>
       _tabLabels.length,
       (i) => FocusNode(debugLabel: 'cfg_tab_$i'),
     );
-    MenuPositionPref.get().then((v) {
-      if (mounted) setState(() => _menuPosition = v);
-    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.onMainFocusNodeCreated?.call(_tabNodes[0]);
     });
@@ -118,7 +114,7 @@ class ConfigPageState extends State<ConfigPage>
     final max = _ConfigTab.values.length - 1;
     final safeIndex = index.clamp(0, max);
     if (safeIndex >= _tabLabels.length || safeIndex >= _tabNodes.length) {
-      return; // evita RangeError si labels/nodes y enum desincronizan
+      return;
     }
     final tab = _ConfigTab.values[safeIndex];
     final changed = _tab != tab;
@@ -166,7 +162,7 @@ class ConfigPageState extends State<ConfigPage>
         return _fuentesKey.currentState;
       case _ConfigTab.addons:
         return _addonsKey.currentState;
-      case _ConfigTab.tvchanel: // ← NUEVO
+      case _ConfigTab.tvchanel:
         return _tvChanelKey.currentState;
       case _ConfigTab.apariencia:
         return _aparienciaKey.currentState;
@@ -201,7 +197,7 @@ class ConfigPageState extends State<ConfigPage>
           key: _addonsKey,
           onRequestTabFocus: _focusCurrentTab,
         );
-      case _ConfigTab.tvchanel: // ← NUEVO
+      case _ConfigTab.tvchanel:
         return TvChanelTab(
           key: _tvChanelKey,
           onRequestTabFocus: _focusCurrentTab,
@@ -210,9 +206,7 @@ class ConfigPageState extends State<ConfigPage>
         return AparienciaTab(
           key: _aparienciaKey,
           onRequestTabFocus: _focusCurrentTab,
-          onMenuPositionChanged: (v) {
-            if (mounted) setState(() => _menuPosition = v);
-          },
+          onMenuPositionChanged: (_) {},
         );
       case _ConfigTab.cache:
         return CacheTab(key: _cacheKey, onRequestTabFocus: _focusCurrentTab);
@@ -234,7 +228,7 @@ class ConfigPageState extends State<ConfigPage>
     ].reduce((a, b) => a < b ? a : b);
     return Container(
       color: const Color(0xFF121214),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Row(
         children: List.generate(count, (i) {
           final selected = _tab.index == i;
@@ -298,7 +292,7 @@ class ConfigPageState extends State<ConfigPage>
                       duration: const Duration(milliseconds: 150),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,
-                        vertical: 12,
+                        vertical: 10,
                       ),
                       decoration: BoxDecoration(
                         color: hasFocus
@@ -340,23 +334,23 @@ class ConfigPageState extends State<ConfigPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final topPad = _menuPosition == 'top' ? 56.0 : 8.0;
+    // ⚠️ NO añadir padding superior aquí: el shell (tv_shell.dart) ya
+    // reserva el espacio del menú superior con _topBarH cuando está en 'top'.
     return Scaffold(
       backgroundColor: kConfigBg,
-      body: Padding(
-        padding: EdgeInsets.only(top: topPad),
-        child: Column(
-          children: [
-            _buildTopTabs(),
-            Expanded(
-              child: SingleChildScrollView(
-                controller: _scroll,
-                padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-                child: _buildBody(),
-              ),
+      primary: false, // evita que el Scaffold sume la status bar otra vez
+      resizeToAvoidBottomInset: false,
+      body: Column(
+        children: [
+          _buildTopTabs(),
+          Expanded(
+            child: SingleChildScrollView(
+              controller: _scroll,
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+              child: _buildBody(),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

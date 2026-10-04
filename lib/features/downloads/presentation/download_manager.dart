@@ -24,6 +24,7 @@ class ActiveDownload {
   final String? posterUrl;
   final String? backdropUrl;
   final Map<String, String>? headers;
+  final String? subtitleUrl; // URL API subtítulos (vtt/srt)
 
   DownloadStatus status;
   double progress;
@@ -50,6 +51,7 @@ class ActiveDownload {
     this.posterUrl,
     this.backdropUrl,
     this.headers,
+    this.subtitleUrl,
     this.status = DownloadStatus.queued,
     this.progress = 0,
     this.statusText = 'En cola…',
@@ -317,6 +319,7 @@ class DownloadManager extends ChangeNotifier {
     String? posterUrl,
     String? backdropUrl,
     Map<String, String>? headers,
+    String? subtitleUrl,
   }) async {
     final id = '${DateTime.now().millisecondsSinceEpoch}_$titulo';
     final item = ActiveDownload(
@@ -330,6 +333,7 @@ class DownloadManager extends ChangeNotifier {
       posterUrl: posterUrl,
       backdropUrl: backdropUrl,
       headers: headers,
+      subtitleUrl: subtitleUrl,
       status: DownloadStatus.downloading,
       statusText: 'Preparando…',
       cancelToken: CancelToken(),
@@ -661,6 +665,23 @@ class DownloadManager extends ChangeNotifier {
     }
 
     // Metadatos offline (incluye archivos locales de las imágenes)
+    String? localSubtitleFile;
+    if (item.subtitleUrl != null && item.subtitleUrl!.isNotEmpty) {
+      try {
+        final subPath = '${contentDir.path}/subtitles.vtt';
+        await _dio.download(
+          item.subtitleUrl!,
+          subPath,
+          cancelToken: item.cancelToken,
+          options: Options(followRedirects: true, responseType: ResponseType.bytes),
+        );
+        final f = File(subPath);
+        if (await f.exists() && await f.length() > 0) {
+          localSubtitleFile = 'subtitles.vtt';
+        }
+      } catch (_) {}
+    }
+
     final meta = <String, dynamic>{
       'titulo': item.titulo,
       'tmdbId': item.tmdbId,
@@ -671,6 +692,7 @@ class DownloadManager extends ChangeNotifier {
       'backdropUrl': item.backdropUrl,
       'posterFile': localPosterFile,
       'backdropFile': localBackdropFile,
+      if (localSubtitleFile != null) 'subtitleFile': localSubtitleFile,
       'downloadedAt': DateTime.now().toIso8601String(),
     };
     await File('${contentDir.path}/meta.json').writeAsString(jsonEncode(meta));

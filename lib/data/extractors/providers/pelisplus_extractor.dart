@@ -68,6 +68,7 @@ class PelisPlusService {
           'servidor': name,
           'server': name,
           'idioma': idioma,
+      'lang': idioma,
           'language': idioma,
           'type': 'embed',
           'url': url,

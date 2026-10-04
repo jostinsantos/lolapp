@@ -12,7 +12,7 @@ class MenuPositionPref {
 
   static Future<String> get() async {
     final p = await SharedPreferences.getInstance();
-    return p.getString(key) ?? 'top';
+    return p.getString(key) ?? 'side';
   }
 
   static Future<void> set(String value) async {

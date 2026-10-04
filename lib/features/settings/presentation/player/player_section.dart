@@ -61,6 +61,7 @@ class PlayerSection {
       ),
       _buildSubSizeSelector(),
       _buildSubHeightSelector(),
+      _SubtitleStyleToggles(refresh: refresh),
       
       _sectionHeader('CONTROLES'),
       _buildToggleCard(
@@ -386,6 +387,221 @@ class PlayerSection {
               activeTrackColor: accent.withValues(alpha: 0.4),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+
+/// Toggles de estilo de subtítulos (fondo, contorno, color de fuente).
+class _SubtitleStyleToggles extends StatefulWidget {
+  final VoidCallback refresh;
+  const _SubtitleStyleToggles({required this.refresh});
+
+  @override
+  State<_SubtitleStyleToggles> createState() => _SubtitleStyleTogglesState();
+}
+
+class _SubtitleStyleTogglesState extends State<_SubtitleStyleToggles> {
+  bool _fondo = false;
+  bool _contorno = true;
+  String _colorHex = '#FFFFFF';
+  bool _loaded = false;
+
+  static const _colors = <(String, String)>[
+    ('#FFFFFF', 'Blanco'),
+    ('#FFE566', 'Amarillo'),
+    ('#7CFF7C', 'Verde'),
+    ('#7CD0FF', 'Azul'),
+    ('#FF9E7C', 'Naranja'),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _fondo = prefs.getBool('subtitulo_fondo') ?? false;
+      _contorno = prefs.getBool('subtitulo_contorno') ?? true;
+      _colorHex = prefs.getString('subtitulo_color') ?? '#FFFFFF';
+      _loaded = true;
+    });
+  }
+
+  Future<void> _setFondo(bool v) async {
+    setState(() => _fondo = v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('subtitulo_fondo', v);
+    widget.refresh();
+  }
+
+  Future<void> _setContorno(bool v) async {
+    setState(() => _contorno = v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('subtitulo_contorno', v);
+    widget.refresh();
+  }
+
+  Future<void> _setColor(String hex) async {
+    setState(() => _colorHex = hex);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('subtitulo_color', hex);
+    widget.refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded) return const SizedBox.shrink();
+    return Column(
+      children: [
+        _toggle(
+          title: 'Fondo de subtítulos',
+          subtitleOn: 'Caja semitransparente detrás del texto',
+          subtitleOff: 'Sin fondo',
+          enabled: _fondo,
+          icon: Icons.rectangle_rounded,
+          onChanged: _setFondo,
+        ),
+        _toggle(
+          title: 'Contorno de subtítulos',
+          subtitleOn: 'Borde negro alrededor del texto',
+          subtitleOff: 'Sin contorno',
+          enabled: _contorno,
+          icon: Icons.border_style_rounded,
+          onChanged: _setContorno,
+        ),
+        Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          decoration: BoxDecoration(
+            color: kCardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.format_color_text_rounded,
+                      color: kAccentColor, size: 22),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Color de fuente',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _colors.map((c) {
+                  final hex = c.$1;
+                  final label = c.$2;
+                  final selected =
+                      _colorHex.toUpperCase() == hex.toUpperCase();
+                  final color = Color(
+                      int.parse(hex.replaceFirst('#', 'FF'), radix: 16));
+                  return GestureDetector(
+                    onTap: () => _setColor(hex),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? kAccentColor.withValues(alpha: 0.2)
+                            : Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: selected ? kAccentColor : Colors.white24,
+                          width: selected ? 2 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 16,
+                            height: 16,
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white24),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            label,
+                            style: TextStyle(
+                              color: selected ? Colors.white : Colors.white70,
+                              fontSize: 13,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _toggle({
+    required String title,
+    required String subtitleOn,
+    required String subtitleOff,
+    required bool enabled,
+    required IconData icon,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+      decoration: BoxDecoration(
+        color: kCardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(icon, color: enabled ? kAccentColor : Colors.white38),
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        subtitle: Text(
+          enabled ? subtitleOn : subtitleOff,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.45),
+            fontSize: 12,
+          ),
+        ),
+        trailing: Switch(
+          value: enabled,
+          activeColor: kAccentColor,
+          onChanged: onChanged,
         ),
       ),
     );

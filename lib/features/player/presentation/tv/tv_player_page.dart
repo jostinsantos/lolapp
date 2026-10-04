@@ -20,8 +20,10 @@ import '../widgets/watch_later_button.dart';
 import '../widgets/next_episode_prompt.dart';
 import '../widgets/screensaver_overlay.dart';
 import '../../../../data/datasources/remote/tmdb/tmdb_player_api.dart';
+import '../../../downloads/presentation/extractor_download_page_tv.dart';
 import 'tv_player_controller.dart';
 import '../widgets/because_you_watched_overlay.dart';
+import '../../../../supabase/supabase_data.dart';
 class _SubtitleCue {
   final Duration start;
   final Duration end;
@@ -263,6 +265,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final FocusNode _qualityFocusNode = FocusNode();
   final FocusNode _infoFocusNode = FocusNode();
   final FocusNode _fitFocusNode = FocusNode();
+  final FocusNode _downloadFocusNode = FocusNode();
   final FocusNode _nextPromptFocusNode = FocusNode();
   final FocusNode _errorServersFocusNode = FocusNode();
   final FocusNode _errorBackFocusNode = FocusNode();
@@ -448,6 +451,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _qualityFocusNode,
       _fitFocusNode,
       _infoFocusNode,
+      _downloadFocusNode,
     ]);
     return list;
   }
@@ -528,6 +532,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _qualityFocusNode,
       _fitFocusNode,
       _infoFocusNode,
+      _downloadFocusNode,
     ];
     if (widget.idioma != null && widget.idioma!.isNotEmpty) {
       _idioma = widget.idioma!.toUpperCase();
@@ -645,6 +650,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final prefs = await SharedPreferences.getInstance();
     final pos = _controller.value.position.inSeconds;
+    final dur = _controller.value.duration.inSeconds;
 
     String? backdrop;
     if (_apiData != null) {
@@ -655,16 +661,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     backdrop ??= _backdropUrl;
 
+    final titulo =
+        _tituloContenido.isNotEmpty ? _tituloContenido : widget.titulo;
+
     final full = {
       'idcontenido': widget.idcontenido,
       'temporada': widget.temporada,
       'capitulo': widget.capitulo,
       'segundo': pos,
-      'titulo': _tituloContenido.isNotEmpty ? _tituloContenido : widget.titulo,
+      'titulo': titulo,
       'tipo': widget.tipo,
       'videoUrl': widget.videoUrl,
       'poster': backdrop ?? '',
       'backdrop': backdrop ?? '',
+      'duration': dur,
       'timestamp': DateTime.now().toIso8601String(),
     };
     await prefs.setString(_getCacheKey(), jsonEncode(full));
@@ -680,16 +690,116 @@ class _PlayerScreenState extends State<PlayerScreen> {
     GuardadosBus.bump();
   }
 
-  Future<int?> _getSavedPosition() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_getCacheKeyRapido());
-    if (raw == null) return null;
+  /// Guarda en Supabase (o cache local si invitado) al salir del reproductor.
+  Future<void> _saveHistorialToDb() async {
+    if (!_controllerReady || !_controller.value.isInitialized) return;
     try {
-      final data = jsonDecode(raw);
-      return data['segundo'] as int?;
-    } catch (_) {
-      return null;
+      final pos = _controller.value.position.inSeconds;
+      final dur = _controller.value.duration.inSeconds;
+      if (pos < 5) return;
+
+      String? backdrop;
+      if (_apiData != null) {
+        final b = _apiData!['backdrop'] ?? _apiData!['backdrop_path'];
+        if (b is String && b.isNotEmpty) {
+          backdrop = _optimizeTmdbUrl(b, size: 'w780');
+        }
+      }
+      backdrop ??= _backdropUrl;
+      if (backdrop != null &&
+          backdrop.isNotEmpty &&
+          !backdrop.startsWith('http')) {
+        backdrop = _optimizeTmdbUrl(backdrop, size: 'w780') ??
+            'https://image.tmdb.org/t/p/w780${backdrop.startsWith('/') ? backdrop : '/$backdrop'}';
+      }
+      final titulo =
+          _tituloContenido.isNotEmpty ? _tituloContenido : widget.titulo;
+      String? poster;
+      if (_apiData != null) {
+        poster = (_apiData!['poster'] ?? _apiData!['poster_path'])?.toString();
+      }
+      if (poster != null && poster.isNotEmpty && !poster.startsWith('http')) {
+        poster = _optimizeTmdbUrl(poster, size: 'w500') ??
+            'https://image.tmdb.org/t/p/w500${poster.startsWith('/') ? poster : '/$poster'}';
+      }
+
+      final mediaType = (widget.tipo.toLowerCase().contains('tv') ||
+              widget.tipo.toLowerCase().contains('serie'))
+          ? 'tv'
+          : 'movie';
+
+      await SupabaseData.saveHistorial(
+        tmdbId: widget.idcontenido,
+        poster: poster,
+        tipo: mediaType,
+        progressSeconds: pos,
+        season: mediaType == 'tv' ? widget.temporada : null,
+        episode: mediaType == 'tv' ? widget.capitulo : null,
+        titulo: titulo,
+        backdrop: backdrop,
+        durationSeconds: dur > 0 ? dur : null,
+      );
+    } catch (e) {
+      debugPrint('[TvPlayer] saveHistorialToDb: $e');
     }
+  }
+
+  /// Posición guardada: primero cache local, si no → historial Supabase.
+  Future<int?> _getSavedPosition() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_getCacheKeyRapido());
+      if (raw != null) {
+        final data = jsonDecode(raw);
+        final sec = data['segundo'] as int?;
+        if (sec != null && sec > 5) return sec;
+      }
+      final fullRaw = prefs.getString(_getCacheKey());
+      if (fullRaw != null) {
+        final data = jsonDecode(fullRaw);
+        final sec = data['segundo'] as int?;
+        if (sec != null && sec > 5) return sec;
+      }
+    } catch (_) {}
+
+    try {
+      final list = await SupabaseData.getHistorial();
+      final id = widget.idcontenido;
+      final tipoRaw = widget.tipo.toLowerCase();
+      final isTvWanted =
+          tipoRaw.contains('tv') || tipoRaw.contains('serie');
+      for (final e in list) {
+        final tid = e['tmdb_id'] ?? e['idcontenido'];
+        final eid = tid is int ? tid : int.tryParse('$tid') ?? 0;
+        if (eid != id) continue;
+        final et = (e['tipo'] ?? 'movie').toString().toLowerCase();
+        final isTv = et.contains('tv') || et.contains('serie');
+        if (isTvWanted != isTv) continue;
+        if (isTvWanted) {
+          final s = e['season'] ?? e['temporada'];
+          final ep = e['episode'] ?? e['capitulo'];
+          final sInt = s is int ? s : int.tryParse('$s');
+          final eInt = ep is int ? ep : int.tryParse('$ep');
+          if (widget.temporada != null &&
+              sInt != null &&
+              sInt != widget.temporada &&
+              sInt != 0) {
+            continue;
+          }
+          if (widget.capitulo != null &&
+              eInt != null &&
+              eInt != widget.capitulo &&
+              eInt != 0) {
+            continue;
+          }
+        }
+        final sec = e['progress_seconds'] as int? ?? e['segundo'] as int? ?? 0;
+        if (sec > 5) return sec;
+      }
+    } catch (e) {
+      debugPrint('[TvPlayer] getSavedPosition supabase: $e');
+    }
+    return null;
   }
 
   Future<void> _loadEpisodeProgress() async {
@@ -2234,6 +2344,28 @@ Future<void> _startControllerWithUrl(
     }
   }
 
+
+  void _openDownloadFromPlayer() {
+    final url = (_servidorUrl ?? widget.servidorUrl ?? _activeUrl).toString();
+    if (url.isEmpty) return;
+    final route = MaterialPageRoute(
+      builder: (_) => ExtractorDownloadPageTv(
+        idcontenido: widget.idcontenido,
+        temporada: widget.tipo == 'tv' ? widget.temporada : null,
+        capitulo: widget.tipo == 'tv' ? widget.capitulo : null,
+        servidorUrl: url,
+        servidorNombre:
+            (_servidorNombre ?? widget.servidorNombre ?? 'Servidor').toString(),
+        tipo: widget.tipo,
+        titulo: widget.titulo,
+        idServidor: widget.idServidor,
+        tmdbId: widget.tmdbId ?? widget.idcontenido,
+        headers: _activeHeaders.isEmpty ? widget.headers : _activeHeaders,
+      ),
+    );
+    Navigator.of(context).push(route);
+  }
+
   void _openInfoModal() {
     _hideControlsTimer?.cancel();
     _lastFocusedActionNode = _infoFocusNode;
@@ -2727,8 +2859,8 @@ Future<void> _startControllerWithUrl(
     );
 
     if (confirm == true) {
-      await _saveCache();
-      _goBackToContent();
+      // _goBackToContent ya hace await de cache + Supabase
+      await _goBackToContent();
     } else if (mounted && !_isDisposing && wasPlaying) {
       _controller.play();
       _scheduleHideControls();
@@ -2738,8 +2870,10 @@ Future<void> _startControllerWithUrl(
   Future<void> _goBackToContent() async {
     if (_isReplacingPlayer) return;
     _isReplacingPlayer = false;
+    // Cache local + Supabase ANTES de matar el controller / salir
     try {
       await _saveCache();
+      await _saveHistorialToDb();
     } catch (_) {}
     _cancelPlayerTimers();
     await _killController();
@@ -3045,6 +3179,12 @@ Future<void> _startControllerWithUrl(
     _nextPromptHideTimer?.cancel();
     _skipIntroHideTimer?.cancel();
     FocusManager.instance.removeListener(_onGlobalFocusChanged);
+
+    // Backup si se salió sin _goBackToContent (dispose no puede await)
+    try {
+      final saveFuture = Future.wait([_saveCache(), _saveHistorialToDb()]);
+      saveFuture.then((_) {}).catchError((_) {});
+    } catch (_) {}
 
     // Si ya se liberó el controller en _navigateToPlayer, no volver a dispose.
     try {
@@ -3767,6 +3907,13 @@ Future<void> _startControllerWithUrl(
           Icons.info_outline_rounded,
           'Info',
           _openInfoModal,
+        ),
+        const SizedBox(width: 10),
+        _buildActionBtn(
+          _downloadFocusNode,
+          Icons.download_rounded,
+          'Descargar',
+          _openDownloadFromPlayer,
         ),
       ],
     );

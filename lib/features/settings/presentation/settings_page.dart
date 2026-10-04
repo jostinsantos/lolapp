@@ -14,11 +14,14 @@ import 'downloads/downloads_section.dart';
 import 'supabase/supabase_section.dart';
 import 'notifications/notifications_section.dart'; // Notificaciones
 import 'actualizaciones/actualizaciones_page.dart'; // Actualizaciones
+import 'ai/ai_usage_section.dart';
+import '../../foryou/presentation/profile_recap_page.dart';
 import '../../addons/presentation/screens/addons_hub_page.dart';
 import '../../player/presentation/widgets/mini_player_service.dart';
 import '../../tvchanel/config/m3u8_page.dart';
 import '../../tvchanel/config/addon_chanel.dart';
 import '../../../presentation/mobile/mobile_shell.dart';
+import '../../../presentation/tv/tv_shell.dart' as tv;
 import '../../../core/constants/tmdb_apis.dart';
 import '../../../supabase/supabase_config.dart';
 import '../../profile/presentation/profile_selection_page.dart';
@@ -597,8 +600,8 @@ class _ConfigPageState extends State<ConfigPage> {
     final ok = await _confirmDialog(
       title: 'Cambiar a vista TV',
       body:
-          'La aplicación se reiniciará para aplicar la interfaz optimizada para TV (orientación horizontal).\n\n¿Deseas continuar?',
-      confirmLabel: 'Reiniciar ahora',
+          'Se aplicará la interfaz optimizada para TV (orientación horizontal).\n\n¿Deseas continuar?',
+      confirmLabel: 'Cambiar ahora',
       accent: kAccentColor,
     );
     if (ok != true) return;
@@ -607,7 +610,21 @@ class _ConfigPageState extends State<ConfigPage> {
     await prefs.setString('app_mode', 'tv');
 
     if (!mounted) return;
-    SystemNavigator.pop();
+    // Orientación landscape y navegación a shell TV (sin cerrar la app)
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => const tv.MainHome(),
+        transitionDuration: const Duration(milliseconds: 300),
+        transitionsBuilder: (_, a, __, child) =>
+            FadeTransition(opacity: a, child: child),
+      ),
+      (_) => false,
+    );
   }
 
   Future<void> _clearByPrefix(List<String> prefixes, String snackMsg) async {
@@ -850,15 +867,14 @@ class _ConfigPageState extends State<ConfigPage> {
                       onTap: () async {
                         await Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (_) => ProfileSelectionPage(
+                            builder: (_) => const ProfileSelectionPage(
                               allowDismiss: true,
-                              onProfileSelected: () {
-                                Navigator.of(context).pop();
-                              },
                             ),
                           ),
                         );
-                        await _loadAllSettings();
+                        // Si el usuario canceló (no eligió perfil), refrescar.
+                        // Si eligió, ProfileSelectionPage ya navegó al Home.
+                        if (mounted) await _loadAllSettings();
                       },
                     ),
                   ],
@@ -873,6 +889,50 @@ class _ConfigPageState extends State<ConfigPage> {
                       Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => const ActualizacionesPage(),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  _buildSectionCard(
+                    title: 'Tu perfil cinéfilo',
+                    subtitle:
+                        'Recap de lo visto, géneros top, me gusta y stats',
+                    icon: Icons.insights_rounded,
+                    accent: const Color(0xFF22C55E),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ProfileRecapPage(),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  _buildSectionCard(
+                    title: 'Inteligencia artificial',
+                    subtitle:
+                        'Usos por hora, tokens y recomendaciones (máx 1 gen/día)',
+                    icon: Icons.auto_awesome_rounded,
+                    accent: const Color(0xFFA855F7),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => Scaffold(
+                            backgroundColor: Colors.black,
+                            appBar: AppBar(
+                              backgroundColor: const Color(0xFF1a1a2e),
+                              title: const Text(
+                                'Inteligencia artificial',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                              iconTheme:
+                                  const IconThemeData(color: Colors.white),
+                            ),
+                            body: const SingleChildScrollView(
+                              child: AiUsageSection(),
+                            ),
+                          ),
                         ),
                       );
                     },

@@ -35,6 +35,7 @@ class TioplusServer {
       'servidor_url': url,
       'calidad': calidad,
       'idioma': idioma,
+      'lang': idioma,
       'estado': 'activo',
       'es_tioplus': true,
     };

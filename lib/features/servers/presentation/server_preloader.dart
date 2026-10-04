@@ -217,6 +217,7 @@ class ServidoresPreloader {
                   'servidor_url': cleanUrl,
                   'calidad': v['quality'] ?? 'HD',
                   'idioma': idiomaCode,
+                  'lang': idiomaCode,
                   'estado': 'activo',
                   'es_cuevana': true,
                 });

@@ -7,7 +7,7 @@ class VersionService {
   // (la versión con la que estás trabajando ahora)
   // ============================================
   static const String currentVersionName = "1.0.3"; // version_aceptada
-  static const int currentVersionCode = 5; // version_code_aceptada (parche)
+  static const int currentVersionCode = 7; // version_code_aceptada (parche)
 
   // URL de tu API
   static const String apiUrl =

@@ -415,6 +415,7 @@ class PoseidonServer {
       'servidor_url': url,
       'calidad': quality,
       'idioma': idiomaCode,
+      'lang': idiomaCode,
       'estado': 'activo',
       'es_poseidon': true,
       'tmdb_id': tmdbId,

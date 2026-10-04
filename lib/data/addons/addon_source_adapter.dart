@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'addon_manager.dart';
 import 'models/addon.dart';
 import 'models/content.dart';
+import 'stremio/stream_badge_repository.dart';
 
 /// Adapta las fuentes instaladas (addons Git) al formato Map que usa
 /// ServidoresModal / SourceAggregator de App1.
@@ -109,6 +110,23 @@ class AddonSourceAdapter {
 
         pump();
         await done.future;
+
+        // ── Complementos Stremio con resource "stream" ─────────────────
+        // (aparte de los plugins JS; un addon solo-stream no genera filas Home)
+        try {
+          final stremio = await mgr.sources.getStreams(
+            content: content,
+            sourceAddons: const [], // solo StremioStreamService interno
+            season: isMovie ? null : season,
+            episode: isMovie ? null : episode,
+          );
+          for (final s in stremio) {
+            if (s.url.isEmpty || controller.isClosed) continue;
+            controller.add(_toModalMapFromStream(s));
+          }
+        } catch (e) {
+          debugPrint('[AddonSourceAdapter] stremio streams: $e');
+        }
       } catch (e, st) {
         debugPrint('[AddonSourceAdapter] scrapeAll error: $e\n$st');
       } finally {
@@ -178,14 +196,26 @@ class AddonSourceAdapter {
   }
 
   Map<String, dynamic> _toModalMap(StreamItem s, AddonManifest addon) {
-    final lang = _guessLang(s.title, s.provider);
+    // Preferir lang del stream (addon); si no, inferir del título/provider
+    final raw = (s.lang ?? '').trim();
+    final lang = raw.isNotEmpty
+        ? _normalizeLang(raw)
+        : _guessLang(s.title, s.provider);
+    final name =
+        s.title.isNotEmpty ? s.title : (s.provider ?? addon.name);
+    final badgeText =
+        '${s.provider ?? ''} $name ${addon.name} ${s.quality ?? ''}';
+    final badges =
+        StreamBadgeRepository.instance.matchAllBadges(badgeText);
+    final badge = badges.isEmpty ? null : badges.first;
     return {
       'servidor_url': s.url,
       'url': s.url,
       'calidad': s.quality ?? 'Digital',
       'idioma': lang,
-      'servidor_nombre': s.title.isNotEmpty ? s.title : (s.provider ?? addon.name),
-      'nombre': s.title.isNotEmpty ? s.title : (s.provider ?? addon.name),
+      'lang': lang,
+      'servidor_nombre': name,
+      'nombre': name,
       'fuente': addon.id,
       'addon_id': addon.id,
       'addon_name': addon.name,
@@ -193,21 +223,107 @@ class AddonSourceAdapter {
       'is_hls': s.isHls,
       'headers': s.headers,
       if (s.infoHash != null) 'infoHash': s.infoHash,
+      if (badge?.logo != null) 'badge_logo': badge!.logo,
+      if (badge != null) 'badge_label': badge.label,
+      if (badges.isNotEmpty)
+        'badges': badges
+            .map((b) => {
+                  if (b.logo != null) 'logo': b.logo,
+                  'label': b.label,
+                  if (b.groupId != null) 'groupId': b.groupId,
+                })
+            .toList(),
       // flags estilo extractores para filtros de idioma en el modal
       if (lang.startsWith('es')) 'es_${addon.id}': true,
       if (lang.startsWith('en') || lang == 'SUB') 'en_${addon.id}': true,
-      if (lang.contains('LAT')) 'lat_${addon.id}': true,
+      if (lang.contains('LAT') || lang == 'es_MX') 'lat_${addon.id}': true,
     };
+  }
+
+  /// Streams de complementos Stremio (sin AddonManifest JS).
+  Map<String, dynamic> _toModalMapFromStream(StreamItem s) {
+    final raw = (s.lang ?? '').trim();
+    final lang = raw.isNotEmpty
+        ? _normalizeLang(raw)
+        : _guessLang(s.title, s.provider);
+    final name = s.title.isNotEmpty ? s.title : (s.provider ?? 'Stremio');
+    final badgeText = '${s.provider ?? ''} $name ${s.quality ?? ''}';
+    final badges =
+        StreamBadgeRepository.instance.matchAllBadges(badgeText);
+    final badge = badges.isEmpty ? null : badges.first;
+    final aid = s.addonId ?? 'stremio';
+    return {
+      'servidor_url': s.url,
+      'url': s.url,
+      'calidad': s.quality ?? 'Digital',
+      'idioma': lang,
+      'lang': lang,
+      'servidor_nombre': name,
+      'nombre': name,
+      'fuente': aid,
+      'addon_id': aid,
+      'addon_name': s.provider ?? 'Stremio',
+      'provider': s.provider ?? 'Stremio',
+      'is_hls': s.isHls,
+      'headers': s.headers,
+      if (s.infoHash != null) 'infoHash': s.infoHash,
+      if (badge?.logo != null) 'badge_logo': badge!.logo,
+      if (badge != null) 'badge_label': badge.label,
+      if (badges.isNotEmpty)
+        'badges': badges
+            .map((b) => {
+                  if (b.logo != null) 'logo': b.logo,
+                  'label': b.label,
+                  if (b.groupId != null) 'groupId': b.groupId,
+                })
+            .toList(),
+      if (lang.startsWith('es')) 'es_$aid': true,
+      if (lang.startsWith('en') || lang == 'SUB') 'en_$aid': true,
+      if (lang.contains('LAT') || lang == 'es_MX') 'lat_$aid': true,
+    };
+  }
+
+  String _normalizeLang(String raw) {
+    final l = raw.toLowerCase().trim();
+    if (l.contains('latino') ||
+        l == 'es_mx' ||
+        l == 'es-mx' ||
+        l == 'lat' ||
+        l == 'mx') {
+      return 'es_MX';
+    }
+    if (l.contains('castellano') ||
+        l.contains('españa') ||
+        l == 'es_es' ||
+        l == 'es-es' ||
+        l == 'es') {
+      return 'es_ES';
+    }
+    if (l.contains('sub') ||
+        l.contains('vos') ||
+        l.contains('english') ||
+        l.contains('inglés') ||
+        l.contains('ingles') ||
+        l == 'en' ||
+        l == 'en_us' ||
+        l == 'en-us') {
+      return 'en_US';
+    }
+    if (l.contains('japon') || l == 'ja' || l == 'jp') return 'ja_JA';
+    if (raw.contains('_') || raw.contains('-')) return raw;
+    return 'es_MX';
   }
 
   String _guessLang(String title, String? provider) {
     final t = '${title.toLowerCase()} ${(provider ?? '').toLowerCase()}';
     if (t.contains('latino') || t.contains('lat ')) return 'es_MX';
-    if (t.contains('castellano') || t.contains('español') || t.contains('spanish')) {
+    if (t.contains('castellano') ||
+        t.contains('español') ||
+        t.contains('spanish')) {
       return 'es_ES';
     }
     if (t.contains('sub') || t.contains('vos') || t.contains('english')) {
-      return 'SUB';
+      return 'en_US';
     }
     return 'es_MX';
   }

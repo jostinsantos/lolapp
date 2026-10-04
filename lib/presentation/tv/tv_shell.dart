@@ -11,11 +11,12 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../features/settings/presentation/tv_config_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../features/tvchanel/home/home_tvchanel_tv.dart';
 import '../shared/modals/playback_setup_modal.dart';
-import '../../core/constants/versiones.dart'; // ← VersionService + VersionInfo con URLs por ABI
+import '../../core/constants/versiones.dart';
 import '../../features/home/presentation/tv_home_page.dart';
 import '../../features/home/presentation/tv_placeholder_page.dart';
 import '../../features/search/presentation/tv_search_page.dart';
@@ -25,8 +26,11 @@ import '../../features/profile/presentation/profile_page.dart';
 import '../../features/discover/presentation/discover_page.dart';
 import '../../features/discover/presentation/tv_discover_page.dart';
 import '../../features/downloads/presentation/downloads_page_tv.dart';
+import '../../features/foryou/presentation/taste_onboarding_page_tv.dart';
+import '../../data/ai/daily_ai_gate.dart';
 import '../../core/utils/display_refresh.dart';
 import '../../core/services/session_watch_timer.dart';
+import '../../supabase/supabase_config.dart';
 
 const _kAccentColor = Color(0xFFE50914);
 const _kSideAccent = Color(0xFF7B5CFF);
@@ -95,11 +99,17 @@ class _MainHomeState extends State<MainHome> {
   static const int _kDescargasIndex = 7;
   static const int _kTvIndex = 8;
   static const double _railWidth = 52;
+  static const double _topBarH = 56;
+  String _menuPosition = 'side';
 
   String _currentTime = '';
   Timer? _clockTimer;
   Timer? _menuCollapseTimer;
   Timer? _transferTimer;
+
+  // ── Avatar del perfil activo ──────────────────────────────────────────
+  String? _profileAvatarUrl;
+  String? _profileName;
 
   // ── Actualización ──────────────────────────────────────────────────────
   bool _updateAvailable = false;
@@ -110,16 +120,12 @@ class _MainHomeState extends State<MainHome> {
   double _downloadProgress = 0;
   String? _downloadError;
 
-  /// URLs por arquitectura
   String? _urlArm64;
   String? _urlArmeabi;
   String? _urlX86;
   String? _urlUniversal;
 
-  /// Preferencia: arm64 | armeabi | x86 | universal
   String? _preferredAbi;
-
-  /// ABI detectado del dispositivo (óptima)
   String? _detectedAbi;
 
   static const _prefAbiKey = 'apk_preferred_abi';
@@ -129,6 +135,9 @@ class _MainHomeState extends State<MainHome> {
   @override
   void initState() {
     super.initState();
+    _loadMenuPosition();
+    _loadProfileSession();
+    MenuPositionPref.version.addListener(_onMenuPositionPrefChanged);
     _menuFocusNodes = [
       _profileFocusNode,
       _homeTabFocusNode,
@@ -149,7 +158,6 @@ class _MainHomeState extends State<MainHome> {
       (_) => _updateTime(),
     );
 
-    // Adaptar la app al máximo Hz de la pantalla (60/90/120/144)
     DisplayRefresh.requestHighest();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -160,11 +168,25 @@ class _MainHomeState extends State<MainHome> {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // AVATAR DEL PERFIL
+  // ═══════════════════════════════════════════════════════════════════════
+
+  Future<void> _loadProfileSession() async {
+    try {
+      final avatar = await SupabaseConfig.getCurrentProfileAvatar();
+      final name = await SupabaseConfig.getCurrentProfileName();
+      if (!mounted) return;
+      setState(() {
+        _profileAvatarUrl = avatar;
+        _profileName = name;
+      });
+    } catch (_) {}
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // DETECCIÓN DE ABI DEL DISPOSITIVO
   // ═══════════════════════════════════════════════════════════════════════
 
-  /// Devuelve el ABI óptimo del dispositivo:
-  /// 'arm64', 'armeabi', 'x86' o 'universal'.
   Future<String?> _detectDeviceAbi() async {
     if (!Platform.isAndroid) return 'universal';
     try {
@@ -181,8 +203,7 @@ class _MainHomeState extends State<MainHome> {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // LÓGICA DE ACTUALIZACIÓN (VersionService + modal arquitectura TV)
-  // Respeta: recibir_actualizaciones + recibir_parches
+  // LÓGICA DE ACTUALIZACIÓN
   // ═══════════════════════════════════════════════════════════════════════
 
   Future<void> _checkForUpdate() async {
@@ -192,7 +213,6 @@ class _MainHomeState extends State<MainHome> {
           prefs.getBool('recibir_actualizaciones') ?? true;
       final recibirParches = prefs.getBool('recibir_parches') ?? false;
 
-      // Si el usuario tiene desactivadas las actualizaciones → no mostrar nada
       if (!recibirActualizaciones) {
         if (mounted) {
           setState(() {
@@ -208,9 +228,6 @@ class _MainHomeState extends State<MainHome> {
       if (!mounted) return;
 
       if (status.requiresUpdate && status.latestVersion != null) {
-        // Solo mostrar si:
-        // - hay cambio de versión, O
-        // - hay parche Y el usuario tiene activado recibir_parches
         final shouldShow =
             status.hasVersionUpdate ||
             (status.hasPatchUpdate && recibirParches);
@@ -239,7 +256,6 @@ class _MainHomeState extends State<MainHome> {
               (v.urlApk.trim().isNotEmpty ? v.urlApk : null);
           _downloadUrl = v.urlApk;
           _detectedAbi = detectedAbi;
-          // Prioridad: elección guardada del usuario > detección automática
           _preferredAbi = savedAbi ?? detectedAbi;
           _updateMessage =
               '${v.versionAceptada} • ${v.novedades.isNotEmpty ? v.novedades : status.message}';
@@ -259,9 +275,7 @@ class _MainHomeState extends State<MainHome> {
           });
         }
       }
-    } catch (_) {
-      // Silencioso
-    }
+    } catch (_) {}
   }
 
   void _dismissUpdateBanner() {
@@ -313,11 +327,9 @@ class _MainHomeState extends State<MainHome> {
     }
   }
 
-  /// Abrir modal de arquitectura (TV / D-pad) y luego descargar.
   Future<void> _onTapDownload() async {
     if (_downloading) return;
 
-    // Detecta ABI si aún no lo tenemos (por si el check no se completó)
     final detectedAbi = _detectedAbi ?? await _detectDeviceAbi();
     if (!mounted) return;
 
@@ -334,7 +346,6 @@ class _MainHomeState extends State<MainHome> {
     );
 
     if (selected == null || !mounted) {
-      // Volver foco al botón Descargar del banner
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _showUpdateBanner) {
           _updateDownloadFocus.requestFocus();
@@ -412,7 +423,9 @@ class _MainHomeState extends State<MainHome> {
 
       if (result.type != ResultType.done && mounted) {
         setState(() {
-          _downloadError = result.message.isNotEmpty ? result.message : 'Activa “Instalar apps desconocidas” para esta app e inténtalo de nuevo.';
+          _downloadError = result.message.isNotEmpty
+              ? result.message
+              : 'Activa "Instalar apps desconocidas" para esta app e inténtalo de nuevo.';
         });
       }
     } catch (e) {
@@ -472,6 +485,27 @@ class _MainHomeState extends State<MainHome> {
     _focusContentOf(_currentIndex);
   }
 
+  Future<void> _maybeShowTasteOnboarding() async {
+    if (!mounted) return;
+    try {
+      final done = await TasteOnboardingGate.isDone();
+      if (done || !mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => TasteOnboardingPageTv(
+            onFinished: () {
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              }
+            },
+          ),
+        ),
+      );
+      if (mounted) _focusContentOf(_currentIndex);
+    } catch (_) {}
+  }
+
   void _updateTime() {
     final now = DateTime.now();
     final hour12 = now.hour % 12 == 0 ? 12 : now.hour % 12;
@@ -483,8 +517,23 @@ class _MainHomeState extends State<MainHome> {
     }
   }
 
+  Future<void> _loadMenuPosition() async {
+    try {
+      final v = await MenuPositionPref.get();
+      if (!mounted) return;
+      if (v == 'top' || v == 'side') {
+        setState(() => _menuPosition = v);
+      }
+    } catch (_) {}
+  }
+
+  void _onMenuPositionPrefChanged() {
+    _loadMenuPosition();
+  }
+
   @override
   void dispose() {
+    MenuPositionPref.version.removeListener(_onMenuPositionPrefChanged);
     _clockTimer?.cancel();
     _menuCollapseTimer?.cancel();
     _transferTimer?.cancel();
@@ -667,6 +716,8 @@ class _MainHomeState extends State<MainHome> {
           (_perfilKey.currentState as dynamic)?.refresh();
         } catch (_) {}
       });
+      // Refresca avatar al abrir perfil (puede haber cambiado)
+      _loadProfileSession();
     }
   }
 
@@ -717,31 +768,72 @@ class _MainHomeState extends State<MainHome> {
       }
     }
 
-    if (key == LogicalKeyboardKey.arrowDown) {
-      final i = _menuFocusNodes.indexOf(node);
-      if (i >= 0 && i < _menuFocusNodes.length - 1) {
-        _navigatingMenu = true;
-        _menuFocusNodes[i + 1].requestFocus();
-        _navigatingMenu = false;
+    if (_menuPosition == 'top') {
+      final topOrder = <FocusNode>[
+        _homeTabFocusNode,
+        _descubrirTabFocusNode,
+        _fuentesTabFocusNode,
+        _searchFocusNode,
+        _guardadosTabFocusNode,
+        _tvTabFocusNode,
+        _descargasTabFocusNode,
+        _settingsFocusNode,
+        _profileFocusNode,
+      ];
+      if (key == LogicalKeyboardKey.arrowDown) {
+        _focusContentOf(_currentIndex);
+        return KeyEventResult.handled;
       }
-      return KeyEventResult.handled;
-    }
-
-    if (key == LogicalKeyboardKey.arrowUp) {
-      final i = _menuFocusNodes.indexOf(node);
-      if (i > 0) {
-        _navigatingMenu = true;
-        _menuFocusNodes[i - 1].requestFocus();
-        _navigatingMenu = false;
+      if (key == LogicalKeyboardKey.arrowLeft) {
+        final i = topOrder.indexOf(node);
+        if (i > 0) {
+          _navigatingMenu = true;
+          topOrder[i - 1].requestFocus();
+          _navigatingMenu = false;
+        }
+        return KeyEventResult.handled;
       }
-      return KeyEventResult.handled;
-    }
+      if (key == LogicalKeyboardKey.arrowRight) {
+        final i = topOrder.indexOf(node);
+        if (i >= 0 && i < topOrder.length - 1) {
+          _navigatingMenu = true;
+          topOrder[i + 1].requestFocus();
+          _navigatingMenu = false;
+        }
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.select ||
+          key == LogicalKeyboardKey.enter) {
+        _enterPage(tabIndex);
+        return KeyEventResult.handled;
+      }
+    } else {
+      if (key == LogicalKeyboardKey.arrowDown) {
+        final i = _menuFocusNodes.indexOf(node);
+        if (i >= 0 && i < _menuFocusNodes.length - 1) {
+          _navigatingMenu = true;
+          _menuFocusNodes[i + 1].requestFocus();
+          _navigatingMenu = false;
+        }
+        return KeyEventResult.handled;
+      }
 
-    if (key == LogicalKeyboardKey.arrowRight ||
-        key == LogicalKeyboardKey.select ||
-        key == LogicalKeyboardKey.enter) {
-      _enterPage(tabIndex);
-      return KeyEventResult.handled;
+      if (key == LogicalKeyboardKey.arrowUp) {
+        final i = _menuFocusNodes.indexOf(node);
+        if (i > 0) {
+          _navigatingMenu = true;
+          _menuFocusNodes[i - 1].requestFocus();
+          _navigatingMenu = false;
+        }
+        return KeyEventResult.handled;
+      }
+
+      if (key == LogicalKeyboardKey.arrowRight ||
+          key == LogicalKeyboardKey.select ||
+          key == LogicalKeyboardKey.enter) {
+        _enterPage(tabIndex);
+        return KeyEventResult.handled;
+      }
     }
 
     if (key == LogicalKeyboardKey.escape ||
@@ -931,8 +1023,6 @@ class _MainHomeState extends State<MainHome> {
     }
   }
 
-  // ── Banner de actualización (TV) ───────────────────────────────────────
-
   Widget _buildUpdateBanner() {
     final pct = (_downloadProgress * 100).clamp(0, 100).toStringAsFixed(0);
 
@@ -1017,8 +1107,6 @@ class _MainHomeState extends State<MainHome> {
                       ),
                     ),
                     const SizedBox(width: 12),
-
-                    // Botón Descargar → abre modal de arquitectura
                     Focus(
                       focusNode: _updateDownloadFocus,
                       onKeyEvent: (node, event) {
@@ -1119,10 +1207,7 @@ class _MainHomeState extends State<MainHome> {
                         },
                       ),
                     ),
-
                     const SizedBox(width: 10),
-
-                    // Botón X
                     Focus(
                       focusNode: _updateCloseFocus,
                       onKeyEvent: (node, event) {
@@ -1232,10 +1317,12 @@ class _MainHomeState extends State<MainHome> {
                 children: [
                   Positioned.fill(
                     child: Padding(
-                      padding: const EdgeInsets.only(left: _railWidth),
+                      padding: EdgeInsets.only(
+                        left: _menuPosition == 'top' ? 0 : _railWidth,
+                        top: _menuPosition == 'top' ? _topBarH : 0,
+                      ),
                       child: IndexedStack(
                         index: () {
-                          // Map logical indices to stack positions
                           switch (_currentIndex) {
                             case 0:
                               return 0;
@@ -1250,11 +1337,11 @@ class _MainHomeState extends State<MainHome> {
                             case 5:
                               return 5;
                             case 6:
-                              return 6; // perfil
+                              return 6;
                             case 7:
-                              return 7; // descargas
+                              return 7;
                             case 8:
-                              return 8; // tv
+                              return 8;
                             default:
                               return 0;
                           }
@@ -1273,28 +1360,52 @@ class _MainHomeState extends State<MainHome> {
                       ),
                     ),
                   ),
-                  Positioned(
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    child: _SideMenu(
-                      expanded: _menuActive,
-                      currentIndex: _currentIndex,
-                      profileSelected: profileSelected,
-                      currentTime: _currentTime,
-                      profileFocus: _profileFocusNode,
-                      homeFocus: _homeTabFocusNode,
-                      descubrirFocus: _descubrirTabFocusNode,
-                      fuentesFocus: _fuentesTabFocusNode,
-                      searchFocus: _searchFocusNode,
-                      guardadosFocus: _guardadosTabFocusNode,
-                      descargasFocus: _descargasTabFocusNode,
-                      tvFocus: _tvTabFocusNode,
-                      settingsFocus: _settingsFocusNode,
-                      onKeyEvent: _onMenuKey,
-                      onSelect: _enterPage,
+                  if (_menuPosition == 'top')
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      top: 0,
+                      child: _TopMenu(
+                        currentIndex: _currentIndex,
+                        profileSelected: profileSelected,
+                        profileFocus: _profileFocusNode,
+                        profileAvatarUrl: _profileAvatarUrl,
+                        homeFocus: _homeTabFocusNode,
+                        descubrirFocus: _descubrirTabFocusNode,
+                        fuentesFocus: _fuentesTabFocusNode,
+                        searchFocus: _searchFocusNode,
+                        guardadosFocus: _guardadosTabFocusNode,
+                        descargasFocus: _descargasTabFocusNode,
+                        tvFocus: _tvTabFocusNode,
+                        settingsFocus: _settingsFocusNode,
+                        onKeyEvent: _onMenuKey,
+                        onSelect: _enterPage,
+                      ),
+                    )
+                  else
+                    Positioned(
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      child: _SideMenu(
+                        expanded: _menuActive,
+                        currentIndex: _currentIndex,
+                        profileSelected: profileSelected,
+                        currentTime: _currentTime,
+                        profileFocus: _profileFocusNode,
+                        profileAvatarUrl: _profileAvatarUrl,
+                        homeFocus: _homeTabFocusNode,
+                        descubrirFocus: _descubrirTabFocusNode,
+                        fuentesFocus: _fuentesTabFocusNode,
+                        searchFocus: _searchFocusNode,
+                        guardadosFocus: _guardadosTabFocusNode,
+                        descargasFocus: _descargasTabFocusNode,
+                        tvFocus: _tvTabFocusNode,
+                        settingsFocus: _settingsFocusNode,
+                        onKeyEvent: _onMenuKey,
+                        onSelect: _enterPage,
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -1306,7 +1417,7 @@ class _MainHomeState extends State<MainHome> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Modal arquitectura (TV) — foco D-pad, hereda del botón Descargar
+// Modal arquitectura
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _AbiPickerDialog extends StatefulWidget {
@@ -1353,7 +1464,7 @@ class _AbiPickerDialogState extends State<_AbiPickerDialog> {
   ];
 
   late final List<FocusNode> _nodes;
-  late final List<int> _enabledIndexes; // índices con URL
+  late final List<int> _enabledIndexes;
 
   @override
   void initState() {
@@ -1371,10 +1482,6 @@ class _AbiPickerDialogState extends State<_AbiPickerDialog> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      // Prioridad para foco inicial:
-      //   1) preferencia del usuario
-      //   2) ABI detectado del dispositivo
-      //   3) primer índice con URL
       int focusIdx = 0;
       bool resolved = false;
 
@@ -1643,7 +1750,317 @@ class _AbiPickerDialogState extends State<_AbiPickerDialog> {
   }
 }
 
-// ── _SideMenu, _SideItem, _ExitDialogBtn ───────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// Menú superior
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _TopMenu extends StatelessWidget {
+  final int currentIndex;
+  final bool profileSelected;
+  final FocusNode profileFocus;
+  final String? profileAvatarUrl;
+  final FocusNode homeFocus;
+  final FocusNode descubrirFocus;
+  final FocusNode fuentesFocus;
+  final FocusNode searchFocus;
+  final FocusNode guardadosFocus;
+  final FocusNode descargasFocus;
+  final FocusNode tvFocus;
+  final FocusNode settingsFocus;
+  final KeyEventResult Function(FocusNode, KeyEvent, int) onKeyEvent;
+  final ValueChanged<int> onSelect;
+
+  const _TopMenu({
+    required this.currentIndex,
+    required this.profileSelected,
+    required this.profileFocus,
+    required this.profileAvatarUrl,
+    required this.homeFocus,
+    required this.descubrirFocus,
+    required this.fuentesFocus,
+    required this.searchFocus,
+    required this.guardadosFocus,
+    required this.descargasFocus,
+    required this.tvFocus,
+    required this.settingsFocus,
+    required this.onKeyEvent,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: SizedBox(
+        height: 56,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ClipRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.35),
+                ),
+              ),
+            ),
+            SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 28),
+                child: Row(
+                  children: [
+                    Image.asset(
+                      'assets/logo.png',
+                      height: 28,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.play_circle_filled,
+                        color: Color(0xFFE50914),
+                        size: 28,
+                      ),
+                    ),
+                    const SizedBox(width: 24),
+                    _TopTab(
+                      label: 'Inicio',
+                      focusNode: homeFocus,
+                      selected: currentIndex == 0,
+                      onKeyEvent: (n, e) => onKeyEvent(n, e, 0),
+                      onTap: () => onSelect(0),
+                    ),
+                    _TopTab(
+                      label: 'Descubrir',
+                      focusNode: descubrirFocus,
+                      selected: currentIndex == 1,
+                      onKeyEvent: (n, e) => onKeyEvent(n, e, 1),
+                      onTap: () => onSelect(1),
+                    ),
+                    _TopTab(
+                      label: 'Catálogos',
+                      focusNode: fuentesFocus,
+                      selected: currentIndex == 2,
+                      onKeyEvent: (n, e) => onKeyEvent(n, e, 2),
+                      onTap: () => onSelect(2),
+                    ),
+                    _TopTab(
+                      label: 'Buscar',
+                      focusNode: searchFocus,
+                      selected: currentIndex == 3,
+                      onKeyEvent: (n, e) => onKeyEvent(n, e, 3),
+                      onTap: () => onSelect(3),
+                    ),
+                    _TopTab(
+                      label: 'Biblioteca',
+                      focusNode: guardadosFocus,
+                      selected: currentIndex == 4,
+                      onKeyEvent: (n, e) => onKeyEvent(n, e, 4),
+                      onTap: () => onSelect(4),
+                    ),
+                    const Spacer(),
+                    _TopIcon(
+                      icon: Icons.live_tv_rounded,
+                      focusNode: tvFocus,
+                      selected: currentIndex == 8,
+                      onKeyEvent: (n, e) => onKeyEvent(n, e, 8),
+                      onTap: () => onSelect(8),
+                    ),
+                    _TopIcon(
+                      icon: Icons.download_rounded,
+                      focusNode: descargasFocus,
+                      selected: currentIndex == 7,
+                      onKeyEvent: (n, e) => onKeyEvent(n, e, 7),
+                      onTap: () => onSelect(7),
+                    ),
+                    _TopIcon(
+                      icon: Icons.settings_rounded,
+                      focusNode: settingsFocus,
+                      selected: currentIndex == 5,
+                      onKeyEvent: (n, e) => onKeyEvent(n, e, 5),
+                      onTap: () => onSelect(5),
+                    ),
+                    _TopProfileIcon(
+                      focusNode: profileFocus,
+                      selected: profileSelected,
+                      avatarUrl: profileAvatarUrl,
+                      onKeyEvent: (n, e) => onKeyEvent(n, e, 6),
+                      onTap: () => onSelect(6),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TopTab extends StatelessWidget {
+  final String label;
+  final FocusNode focusNode;
+  final bool selected;
+  final KeyEventResult Function(FocusNode, KeyEvent) onKeyEvent;
+  final VoidCallback onTap;
+
+  const _TopTab({
+    required this.label,
+    required this.focusNode,
+    required this.selected,
+    required this.onKeyEvent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      focusNode: focusNode,
+      onKeyEvent: onKeyEvent,
+      child: Builder(
+        builder: (context) {
+          final focused = Focus.of(context).hasFocus;
+          return GestureDetector(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: focused || selected
+                      ? Colors.white
+                      : Colors.white.withValues(alpha: 0.7),
+                  fontWeight: selected || focused
+                      ? FontWeight.w700
+                      : FontWeight.w500,
+                  fontSize: 15,
+                  decoration: focused
+                      ? TextDecoration.underline
+                      : TextDecoration.none,
+                  decorationColor: Colors.white,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _TopIcon extends StatelessWidget {
+  final IconData icon;
+  final FocusNode focusNode;
+  final bool selected;
+  final KeyEventResult Function(FocusNode, KeyEvent) onKeyEvent;
+  final VoidCallback onTap;
+
+  const _TopIcon({
+    required this.icon,
+    required this.focusNode,
+    required this.selected,
+    required this.onKeyEvent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      focusNode: focusNode,
+      onKeyEvent: onKeyEvent,
+      child: Builder(
+        builder: (context) {
+          final focused = Focus.of(context).hasFocus;
+          return GestureDetector(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Icon(
+                icon,
+                color: focused || selected ? Colors.white : Colors.white70,
+                size: 26,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Icono de perfil en el menú superior: si hay avatar se muestra en
+/// círculo sin botón; si no, el icono de persona.
+class _TopProfileIcon extends StatelessWidget {
+  final FocusNode focusNode;
+  final bool selected;
+  final String? avatarUrl;
+  final KeyEventResult Function(FocusNode, KeyEvent) onKeyEvent;
+  final VoidCallback onTap;
+
+  const _TopProfileIcon({
+    required this.focusNode,
+    required this.selected,
+    required this.avatarUrl,
+    required this.onKeyEvent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasAvatar = avatarUrl != null && avatarUrl!.trim().isNotEmpty;
+    return Focus(
+      focusNode: focusNode,
+      onKeyEvent: onKeyEvent,
+      child: Builder(
+        builder: (context) {
+          final focused = Focus.of(context).hasFocus;
+          return GestureDetector(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: hasAvatar ? Colors.transparent : Colors.white12,
+                  border: Border.all(
+                    color: focused || selected
+                        ? Colors.white
+                        : Colors.transparent,
+                    width: focused || selected ? 2 : 0,
+                  ),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: hasAvatar
+                    ? Image.network(
+                        avatarUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Icon(
+                          Icons.person_rounded,
+                          size: 20,
+                          color: focused || selected
+                              ? Colors.white
+                              : Colors.white70,
+                        ),
+                      )
+                    : Icon(
+                        Icons.person_rounded,
+                        size: 20,
+                        color: focused || selected
+                            ? Colors.white
+                            : Colors.white70,
+                      ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Menú lateral
+// ═══════════════════════════════════════════════════════════════════════════
 
 class _SideMenu extends StatelessWidget {
   final bool expanded;
@@ -1651,6 +2068,7 @@ class _SideMenu extends StatelessWidget {
   final bool profileSelected;
   final String currentTime;
   final FocusNode profileFocus;
+  final String? profileAvatarUrl;
   final FocusNode homeFocus;
   final FocusNode descubrirFocus;
   final FocusNode fuentesFocus;
@@ -1668,6 +2086,7 @@ class _SideMenu extends StatelessWidget {
     required this.profileSelected,
     required this.currentTime,
     required this.profileFocus,
+    required this.profileAvatarUrl,
     required this.homeFocus,
     required this.descubrirFocus,
     required this.fuentesFocus,
@@ -1736,13 +2155,11 @@ class _SideMenu extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const SizedBox(height: 10),
-                  _SideItem(
+                  _SideProfileItem(
                     expanded: expanded,
-                    icon: Icons.person_rounded,
-                    label: 'Perfil',
                     focusNode: profileFocus,
                     selected: profileSelected,
-                    isProfile: true,
+                    avatarUrl: profileAvatarUrl,
                     onKeyEvent: (n, e) => onKeyEvent(n, e, 6),
                     onTap: () => onSelect(6),
                   ),
@@ -1854,13 +2271,148 @@ class _SideMenu extends StatelessWidget {
   }
 }
 
+/// Item del perfil en el menú lateral. Siempre en círculo.
+/// Si hay avatar lo muestra; si no, el icono de persona.
+class _SideProfileItem extends StatelessWidget {
+  final bool expanded;
+  final FocusNode focusNode;
+  final bool selected;
+  final String? avatarUrl;
+  final KeyEventResult Function(FocusNode, KeyEvent) onKeyEvent;
+  final VoidCallback onTap;
+
+  const _SideProfileItem({
+    required this.expanded,
+    required this.focusNode,
+    required this.selected,
+    required this.avatarUrl,
+    required this.onKeyEvent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasAvatar = avatarUrl != null && avatarUrl!.trim().isNotEmpty;
+
+    return Focus(
+      focusNode: focusNode,
+      onKeyEvent: (node, event) => onKeyEvent(node, event),
+      child: Builder(
+        builder: (context) {
+          final hasFocus = Focus.of(context).hasFocus;
+
+          final avatarCircle = Container(
+            width: expanded ? 30 : 32,
+            height: expanded ? 30 : 32,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: hasAvatar ? Colors.transparent : Colors.white12,
+              border: Border.all(
+                color: hasFocus || selected
+                    ? Colors.white
+                    : Colors.transparent,
+                width: hasFocus || selected ? 2 : 0,
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: hasAvatar
+                ? Image.network(
+                    avatarUrl!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Icon(
+                      Icons.person_rounded,
+                      size: 18,
+                      color: hasFocus || selected
+                          ? Colors.white
+                          : Colors.white70,
+                    ),
+                  )
+                : Icon(
+                    Icons.person_rounded,
+                    size: 18,
+                    color: hasFocus || selected
+                        ? Colors.white
+                        : Colors.white70,
+                  ),
+          );
+
+          return Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: expanded ? 6 : 5,
+              vertical: 1,
+            ),
+            child: GestureDetector(
+              onTap: () {
+                focusNode.requestFocus();
+                onTap();
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
+                curve: Curves.easeOut,
+                height: expanded ? 34 : 32,
+                padding: EdgeInsets.symmetric(horizontal: expanded ? 8 : 0),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? _kSideAccent
+                      : hasFocus
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(expanded ? 20 : 10),
+                  border: Border.all(
+                    color: hasFocus && !selected
+                        ? Colors.white.withValues(alpha: 0.65)
+                        : Colors.transparent,
+                    width: 1.8,
+                  ),
+                  boxShadow: selected
+                      ? [
+                          BoxShadow(
+                            color: _kSideAccent.withValues(alpha: 0.35),
+                            blurRadius: 12,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: expanded
+                    ? Row(
+                        children: [
+                          avatarCircle,
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Perfil',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: selected
+                                    ? Colors.white
+                                    : Colors.white.withValues(alpha: 0.9),
+                                fontSize: 12,
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : Center(child: avatarCircle),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _SideItem extends StatelessWidget {
   final bool expanded;
   final IconData icon;
   final String label;
   final FocusNode focusNode;
   final bool selected;
-  final bool isProfile;
   final KeyEventResult Function(FocusNode, KeyEvent) onKeyEvent;
   final VoidCallback onTap;
 
@@ -1872,7 +2424,6 @@ class _SideItem extends StatelessWidget {
     required this.selected,
     required this.onKeyEvent,
     required this.onTap,
-    this.isProfile = false,
   });
 
   @override
@@ -1925,30 +2476,13 @@ class _SideItem extends StatelessWidget {
                 child: expanded
                     ? Row(
                         children: [
-                          if (isProfile)
-                            Container(
-                              width: 26,
-                              height: 26,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: selected
-                                    ? Colors.white.withValues(alpha: 0.22)
-                                    : Colors.white.withValues(alpha: 0.10),
-                              ),
-                              child: Icon(
-                                icon,
-                                size: 14,
-                                color: selected ? Colors.white : Colors.white70,
-                              ),
-                            )
-                          else
-                            Icon(
-                              icon,
-                              size: 16,
-                              color: selected
-                                  ? Colors.white
-                                  : Colors.white.withValues(alpha: 0.88),
-                            ),
+                          Icon(
+                            icon,
+                            size: 16,
+                            color: selected
+                                ? Colors.white
+                                : Colors.white.withValues(alpha: 0.88),
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
@@ -1969,29 +2503,13 @@ class _SideItem extends StatelessWidget {
                         ],
                       )
                     : Center(
-                        child: isProfile
-                            ? Container(
-                                width: 26,
-                                height: 26,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: selected
-                                      ? Colors.white.withValues(alpha: 0.2)
-                                      : Colors.white.withValues(alpha: 0.1),
-                                ),
-                                child: Icon(
-                                  icon,
-                                  size: 14,
-                                  color: Colors.white.withValues(alpha: 0.92),
-                                ),
-                              )
-                            : Icon(
-                                icon,
-                                size: 18,
-                                color: selected
-                                    ? Colors.white
-                                    : Colors.white.withValues(alpha: 0.78),
-                              ),
+                        child: Icon(
+                          icon,
+                          size: 18,
+                          color: selected
+                              ? Colors.white
+                              : Colors.white.withValues(alpha: 0.78),
+                        ),
                       ),
               ),
             ),

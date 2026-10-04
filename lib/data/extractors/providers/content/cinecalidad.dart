@@ -35,6 +35,7 @@ class CinecalidadServer {
       'servidor_url': url,
       'calidad': calidad,
       'idioma': idioma,
+      'lang': idioma,
       'estado': 'activo',
       'es_cinecalidad': true,
     };

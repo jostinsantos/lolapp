@@ -12,6 +12,7 @@ import '../../player/presentation/player_page.dart';
 import '../../content/presentation/content_options_modal.dart';
 import '../../downloads/presentation/download_manager.dart';
 import '../../downloads/presentation/local_player_page.dart';
+import '../../../supabase/supabase_data.dart';
 
 const _kAccent = Colors.purpleAccent;
 const _kGreen = Color(0xFF4CAF50);
@@ -135,35 +136,99 @@ class BibliotecaUnificadaPageState extends State<BibliotecaUnificadaPage>
     });
   }
 
-  /// Idéntico a GuardadosPage._loadHistorial()
+  /// Historial desde Supabase (logueado) o cache local (invitado).
+  /// Normaliza campos para que la UI (poster, idcontenido, segundo, etc.) funcione.
   Future<List<Map<String, dynamic>>> _loadHistorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final keys = prefs
-        .getKeys()
-        .where((k) => k.startsWith('cachePlayer_'))
-        .toList();
+    try {
+      final list = await SupabaseData.getHistorial();
+      final result = <Map<String, dynamic>>[];
 
-    final List<Map<String, dynamic>> result = [];
+      for (final raw in list) {
+        final data = Map<String, dynamic>.from(raw);
+        final tmdbId = data['tmdb_id'] ?? data['idcontenido'] ?? 0;
+        final id = tmdbId is int ? tmdbId : int.tryParse('$tmdbId') ?? 0;
+        if (id <= 0) continue;
 
-    for (final key in keys) {
-      try {
-        final raw = prefs.getString(key);
-        if (raw == null) continue;
-        final data = Map<String, dynamic>.from(jsonDecode(raw));
-        final segundo = data['segundo'] as int? ?? 0;
-        if (segundo < 8) continue;
-        data['_cacheKey'] = key; // solo para poder borrar en modo selección
-        result.add(data);
-      } catch (_) {}
+        final segundo = data['progress_seconds'] as int? ??
+            data['segundo'] as int? ??
+            0;
+        if (segundo < 5) continue;
+
+        final tipo = (data['tipo'] ?? 'movie').toString().toLowerCase();
+        final isTv = tipo.contains('tv') || tipo.contains('serie');
+        // 0 es sentinela en BD para movies; en UI no mostrar S0E0
+        int? season = data['season'] is int
+            ? data['season'] as int
+            : int.tryParse('${data['season'] ?? data['temporada'] ?? ''}');
+        int? episode = data['episode'] is int
+            ? data['episode'] as int
+            : int.tryParse('${data['episode'] ?? data['capitulo'] ?? ''}');
+        if (!isTv || season == 0) season = null;
+        if (!isTv || episode == 0) episode = null;
+
+        // Clave estable para selección / borrado
+        final cacheKey = data['id']?.toString() ??
+            'hist_${id}_${tipo}_${season ?? 0}_${episode ?? 0}';
+
+        // Poster: priorizar URL completa ya guardada en Supabase
+        String poster = '';
+        for (final key in [
+          'poster',
+          'poster_path',
+          'posterUrl',
+          'backdrop',
+          'backdrop_path',
+        ]) {
+          final v = data[key]?.toString() ?? '';
+          if (v.isEmpty) continue;
+          if (v.startsWith('http://') || v.startsWith('https://')) {
+            poster = v;
+            break;
+          }
+          if (v.startsWith('/')) {
+            poster = 'https://image.tmdb.org/t/p/w500$v';
+            break;
+          }
+          if (v.contains('.') && !v.contains(' ')) {
+            poster = 'https://image.tmdb.org/t/p/w500/${v.startsWith('/') ? v.substring(1) : v}';
+            break;
+          }
+        }
+
+        result.add({
+          ...data,
+          'idcontenido': id,
+          'tmdb_id': id,
+          'segundo': segundo,
+          'progress_seconds': segundo,
+          'temporada': season,
+          'capitulo': episode,
+          'tipo': tipo,
+          'titulo': data['titulo']?.toString() ??
+              data['title']?.toString() ??
+              '',
+          'poster': poster,
+          'backdrop': data['backdrop']?.toString() ?? poster,
+          'duration': data['duration_seconds'] ?? data['duration'],
+          'timestamp': data['updated_at']?.toString() ??
+              data['created_at']?.toString() ??
+              data['timestamp']?.toString() ??
+              '',
+          '_cacheKey': cacheKey,
+          '_supabaseId': data['id']?.toString(),
+        });
+      }
+
+      result.sort((a, b) {
+        final ta = a['timestamp']?.toString() ?? '';
+        final tb = b['timestamp']?.toString() ?? '';
+        return tb.compareTo(ta);
+      });
+      return result;
+    } catch (e) {
+      debugPrint('[Biblioteca] _loadHistorial error: $e');
+      return [];
     }
-
-    result.sort((a, b) {
-      final ta = a['timestamp']?.toString() ?? '';
-      final tb = b['timestamp']?.toString() ?? '';
-      return tb.compareTo(ta);
-    });
-
-    return result;
   }
 
   List<Map<String, dynamic>> get _filteredGuardados {
@@ -655,10 +720,37 @@ class BibliotecaUnificadaPageState extends State<BibliotecaUnificadaPage>
       }
       await _loadDownloads();
     } else if (_tab == _Tab.historial) {
-      final prefs = await SharedPreferences.getInstance();
       for (final id in _selected.toList()) {
-        if (id.startsWith('h:')) {
-          final key = id.substring(2);
+        if (!id.startsWith('h:')) continue;
+        final key = id.substring(2);
+        // Buscar el item en _historial para tener tmdb_id / tipo / season / episode
+        final match = _historial.cast<Map?>().firstWhere(
+          (e) {
+            if (e == null) return false;
+            return '${e['_cacheKey']}' == key ||
+                '${e['idcontenido']}' == key ||
+                '${e['_supabaseId']}' == key;
+          },
+          orElse: () => null,
+        );
+        if (match != null) {
+          final tmdbId = match['tmdb_id'] as int? ??
+              match['idcontenido'] as int? ??
+              0;
+          final tipo = (match['tipo'] ?? 'movie').toString().toLowerCase();
+          final season = match['temporada'] as int? ?? match['season'] as int?;
+          final episode = match['capitulo'] as int? ?? match['episode'] as int?;
+          if (tmdbId > 0) {
+            await SupabaseData.removeHistorial(
+              tmdbId: tmdbId,
+              tipo: tipo.contains('tv') || tipo.contains('serie') ? 'tv' : 'movie',
+              season: season,
+              episode: episode,
+            );
+          }
+        } else {
+          // Fallback: borrar de SharedPreferences por si quedó cache viejo
+          final prefs = await SharedPreferences.getInstance();
           await prefs.remove(key);
         }
       }
@@ -696,10 +788,15 @@ class BibliotecaUnificadaPageState extends State<BibliotecaUnificadaPage>
 
   // ─── Acciones individuales ───────────────────────────────────────────────
   void _openHistorial(Map<String, dynamic> item) {
-    final id = item['idcontenido'] as int? ?? 0;
+    final rawId = item['idcontenido'] ?? item['tmdb_id'] ?? 0;
+    final id = rawId is int ? rawId : int.tryParse('$rawId') ?? 0;
     if (id <= 0) return;
-    final temporada = item['temporada'] as int?;
-    final capitulo = item['capitulo'] as int?;
+    final temporada = item['temporada'] is int
+        ? item['temporada'] as int
+        : int.tryParse('${item['temporada'] ?? ''}');
+    final capitulo = item['capitulo'] is int
+        ? item['capitulo'] as int
+        : int.tryParse('${item['capitulo'] ?? ''}');
     final tipo = (item['tipo'] ?? 'movie').toString().toLowerCase();
     final titulo = item['titulo']?.toString() ?? '';
     final videoUrl = item['videoUrl']?.toString() ?? '';

@@ -47,6 +47,7 @@ class FuegoCineService {
           'servidor_nombre': s['servidor_nombre']?.toString() ?? 'Modlyo',
           'calidad': s['calidad']?.toString() ?? 'HD',
           'idioma': _normalizeIdioma(s['idioma']?.toString()),
+      'lang': _normalizeIdioma(s['idioma']?.toString()),
           'es_fuegocine': true,
         };
       }

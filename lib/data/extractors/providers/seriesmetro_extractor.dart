@@ -484,6 +484,7 @@ class SeriesMetroServer {
       'servidor_url': url,
       'calidad': 'HD',
       'idioma': SeriesMetroService._languageToCode(language),
+      'lang': SeriesMetroService._languageToCode(language),
       'estado': 'activo',
       'es_seriesmetro': true,
       'tmdb_id': tmdbId,

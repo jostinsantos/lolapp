@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../tv_config_shared.dart';
+import '../../../../presentation/mobile/mobile_shell.dart' as mobile;
 /// Pestaña Apariencia — StatefulWidget independiente.
 class AparienciaTab extends StatefulWidget {
   final VoidCallback onRequestTabFocus;
@@ -63,15 +64,28 @@ class AparienciaTabState extends State<AparienciaTab>
       context: context,
       title: 'Cambiar a vista Móvil',
       body:
-          'La aplicación se reiniciará para aplicar la interfaz optimizada para móvil (orientación vertical).\n\n¿Deseas continuar?',
+          'Se aplicará la interfaz optimizada para móvil (orientación vertical).\n\n¿Deseas continuar?',
       accent: kConfigAccent,
-      confirmLabel: 'Reiniciar ahora',
+      confirmLabel: 'Cambiar ahora',
     );
     if (ok != true) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('app_mode', 'mobile');
     if (!mounted) return;
-    SystemNavigator.pop();
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => const mobile.MainHome(),
+        transitionDuration: const Duration(milliseconds: 300),
+        transitionsBuilder: (_, a, __, child) =>
+            FadeTransition(opacity: a, child: child),
+      ),
+      (_) => false,
+    );
   }
 
   void requestFirstFocus() => _btnMenuPosition.requestFocus();

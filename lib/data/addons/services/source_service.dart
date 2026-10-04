@@ -3,12 +3,16 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/addon.dart';
 import '../models/content.dart';
+import '../stremio/stremio_stream_service.dart';
 import 'js_runtime.dart';
 import 'tmdb_service.dart';
 
-/// Resuelve streams desde addons de tipo source (JS Nuvio + JSON Stremio).
+/// Resuelve streams desde:
+/// 1) addons JS/Git (fuentes propias)
+/// 2) addons Stremio/Nuvio con resource "stream" → /stream/{type}/{id}.json
 class SourceService {
   final JsAddonRuntime _js = JsAddonRuntime.instance;
+  final StremioStreamService _stremioStreams = StremioStreamService();
 
   static const cinecalidadJsUrl =
       'https://raw.githubusercontent.com/KennethJYS/Nuvio-Providers-Latino/refs/heads/main/providers/cinecalidad.js';
@@ -16,9 +20,12 @@ class SourceService {
   Future<List<StreamItem>> getStreams({
     required ContentItem content,
     required List<AddonManifest> sourceAddons,
+    int? season,
+    int? episode,
   }) async {
     final results = <StreamItem>[];
 
+    // 1) Fuentes JS/Git de la app
     for (final addon in sourceAddons.where((a) => a.enabled && a.isSource)) {
       try {
         final streams = await _resolveAddon(addon, content);
@@ -26,6 +33,18 @@ class SourceService {
       } catch (e, st) {
         debugPrint('[Source] ${addon.id}: $e\n$st');
       }
+    }
+
+    // 2) Corrientes Stremio/Nuvio (protocolo /stream/...)
+    try {
+      final stremio = await _stremioStreams.getStreamsForContent(
+        content: content,
+        season: season,
+        episode: episode,
+      );
+      results.addAll(stremio);
+    } catch (e) {
+      debugPrint('[Source] stremio streams: $e');
     }
 
     final seen = <String>{};
